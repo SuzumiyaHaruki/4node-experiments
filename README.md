@@ -1,8 +1,42 @@
 # 裸机实验脚本
 
-这个目录是一套适配当前 4 台裸机/云主机部署的实验脚本，思路参考了
-`endorsement/nitro-testnode/experiments`，但去掉了 Docker Compose 依赖，改成了
-适合当前 `node-1` + `node-2/3/4` 拓扑的版本。
+这是一个独立的实验仓库，用来在 4 台裸机/云主机上复现实验。
+
+它的定位是：
+
+- 基于 `node-1` + `node-2/3/4` 的四机拓扑
+- 不依赖 Docker Compose
+- 可直接用于 correctness / performance / threshold / fault 四类实验
+- 产物会落在本目录下的 `results/`、`accounts_pool/` 等目录中，便于归档和重复实验
+
+这套脚本的思路参考了 `endorsement/nitro-testnode/experiments`，但改成了更适合当前裸机部署的版本。
+
+## 仓库结构
+
+- `README.md`：仓库说明和使用方式
+- `prepare_accounts.sh`：准备单个 case 的账户
+- `prepare_accounts_pool.sh`：批量准备矩阵账户
+- `send_workload.sh`：向 `node-1` 发交易
+- `run_case.sh`：执行单个实验 case
+- `run_matrix.sh`：按矩阵批量执行 case
+- `fault_injector.sh`：通过 SSH 对背书节点注入故障
+- `extract_metrics.py`：汇总交易结果和日志指标
+- `matrix_*.json`：四类实验矩阵
+
+## 输出目录约定
+
+建议把实验输出放在仓库内的独立目录中，例如：
+
+- `results/correctness`
+- `results/performance`
+- `results/threshold`
+- `results/fault`
+
+脚本默认不会覆盖仓库里的脚本文件，只会在你指定的输出目录里生成：
+
+- `tx_results.csv`
+- `summary.json`
+- `summary.tsv`
 
 ## 目录内容
 

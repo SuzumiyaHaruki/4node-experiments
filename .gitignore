@@ -1,0 +1,24 @@
+# Experiment outputs
+results/
+exp_*/
+accounts_pool/
+.fault_status/
+
+# Temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Editor folders
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
