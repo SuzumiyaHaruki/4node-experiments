@@ -244,7 +244,7 @@ cd /home/nitro/Desktop/experiments
 
 目标是观察不同流量和失败比例下的延迟、吞吐和成功率。
 
-这一组现在使用 `send_mode=deferred`，也就是先把一批交易快速发出去，再统一等回执。当前默认配置把 `tx_total` 提到 `120`，`tps` 提到 `20`，并把 batching window 调到 `1.2 秒`，这样更容易把大约 20 笔交易压进同一个区块，观察 `10% fail` 和 `30% fail` 的差异。
+这一组现在使用 `send_mode=concurrent`，也就是先并发提交一批交易，再统一等回执。当前默认配置把 `tx_total` 提到 `120`，`tps` 提到 `20`，并把 batching window 调到 `1.2 秒`，同时把并发度设成 `20`，这样更容易把大约 20 笔交易压进同一个区块，观察 `10% fail` 和 `30% fail` 的差异。
 
 同时，`run_all_experiments.sh` 在进入 performance 矩阵前会先把 `node-1` 切到 1 秒 batching window 的 burst 配置，但不会清掉链上余额和账户。
 
@@ -263,7 +263,7 @@ cd /home/nitro/Desktop/experiments
 - `perf_remote_mixed_10pct_fail`
 - `perf_remote_mixed_30pct_fail`
 
-这些 case 默认的 `tx_total` 都是 120，`tps` 都是 20，`send_mode` 都是 `deferred`。  
+这些 case 默认的 `tx_total` 都是 120，`tps` 都是 20，`send_mode` 都是 `concurrent`，并发度是 `20`。
 如果你想自己做一个更小的 smoke test，可以单独跑一个 case，再把 `tx_total` 和 `tps` 改小一点，先确认链路没问题。
 
 ### 3. Threshold

@@ -11,6 +11,7 @@ KEY_FAIL=""
 TO_KEEP=""
 TO_FAIL=""
 SEND_MODE="sequential"
+CONCURRENCY="20"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -24,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --to-keep) TO_KEEP="$2"; shift 2 ;;
     --to-fail) TO_FAIL="$2"; shift 2 ;;
     --send-mode) SEND_MODE="$2"; shift 2 ;;
+    --concurrency) CONCURRENCY="$2"; shift 2 ;;
     *) echo "unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -40,6 +42,15 @@ PY
 )
 
 echo "seq,tx_type,send_ts_ns,tx_hash,receipt_status,block_number,latency_ms,error,error_stage" > "$OUT_CSV"
+
+sanitize_csv_field() {
+  local value="$1"
+  value="${value//$'\r'/ }"
+  value="${value//$'\n'/ }"
+  value="${value//|/;}"
+  value="${value//,/;}"
+  printf '%s' "$value"
+}
 
 get_receipt() {
   local tx_hash="$1"
@@ -65,73 +76,233 @@ PY
   return 1
 }
 
-fail_count=$(python3 - <<PY
+write_send_file() {
+  local path="$1"
+  shift
+  printf '%s|%s|%s|%s|%s|%s\n' "$@" > "$path"
+}
+
+write_final_file() {
+  local path="$1"
+  shift
+  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$@" > "$path"
+}
+
+submit_tx() {
+  local seq="$1"
+  local tx_type="$2"
+  local key="$3"
+  local to="$4"
+  local nonce="$5"
+  local out_path="$6"
+
+  local send_ts_ns send_out tx_hash err
+  send_ts_ns=$(date +%s%N)
+  send_out=$(cast send "$to" \
+    --value 0.001ether \
+    --private-key "$key" \
+    --rpc-url "$RPC_URL" \
+    --nonce "$nonce" \
+    --json 2>&1 || true)
+  tx_hash=$(jq -r '.transactionHash // empty' <<<"$send_out" 2>/dev/null || true)
+  if [[ -z "$tx_hash" ]]; then
+    err=$(sanitize_csv_field "$(echo "$send_out" | tr '\n' ' ')")
+    write_send_file "$out_path" "$seq" "$tx_type" "$send_ts_ns" "" "$err" "send"
+    return 0
+  fi
+
+  write_send_file "$out_path" "$seq" "$tx_type" "$send_ts_ns" "$tx_hash" "" ""
+}
+
+poll_tx_receipt() {
+  local send_path="$1"
+  local receipt_path="$2"
+
+  local seq tx_type send_ts_ns tx_hash send_error send_error_stage
+  IFS='|' read -r seq tx_type send_ts_ns tx_hash send_error send_error_stage < "$send_path"
+  if [[ -z "$tx_hash" ]]; then
+    write_final_file "$receipt_path" "$seq" "$tx_type" "$send_ts_ns" "" "" "" "" "$send_error" "$send_error_stage"
+    return 0
+  fi
+
+  local receipt_line receipt_status block_number latency_ms err err_stage
+  receipt_line=$(get_receipt "$tx_hash" "$send_ts_ns") || true
+  IFS=',' read -r receipt_status block_number latency_ms err err_stage <<<"$receipt_line"
+  write_final_file "$receipt_path" "$seq" "$tx_type" "$send_ts_ns" "$tx_hash" "$receipt_status" "$block_number" "$latency_ms" "$err" "$err_stage"
+}
+
+throttle_jobs() {
+  local limit="$1"
+  if [[ "$limit" -le 0 ]]; then
+    return 0
+  fi
+  while (( $(jobs -pr | wc -l) >= limit )); do
+    wait -n || true
+  done
+}
+
+get_nonce_for_key() {
+  local key="$1"
+  local addr
+  addr=$(cast wallet address --private-key "$key")
+  local nonce
+  nonce=$(cast nonce "$addr" --rpc-url "$RPC_URL")
+  echo "$nonce"
+}
+
+run_legacy_mode() {
+  local fail_count
+  fail_count=$(python3 - <<PY
 total=int("$TX_TOTAL")
 ratio=float("$FAIL_RATIO")
 print(int(total * ratio))
 PY
 )
 
-declare -a row_seq row_tx_type row_send_ts row_tx_hash row_receipt_status row_block_number row_latency_ms row_error row_error_stage row_tx_kind
-pending_indices=()
+  declare -a row_seq row_tx_type row_send_ts row_tx_hash row_receipt_status row_block_number row_latency_ms row_error row_error_stage
+  pending_indices=()
 
-append_row() {
-  local idx="$1"
-  row_seq[idx]="$2"
-  row_tx_type[idx]="$3"
-  row_send_ts[idx]="$4"
-  row_tx_hash[idx]="$5"
-  row_receipt_status[idx]="$6"
-  row_block_number[idx]="$7"
-  row_latency_ms[idx]="$8"
-  row_error[idx]="$9"
-  row_error_stage[idx]="${10}"
-}
+  append_row() {
+    local idx="$1"
+    row_seq[idx]="$2"
+    row_tx_type[idx]="$3"
+    row_send_ts[idx]="$4"
+    row_tx_hash[idx]="$5"
+    row_receipt_status[idx]="$6"
+    row_block_number[idx]="$7"
+    row_latency_ms[idx]="$8"
+    row_error[idx]="$9"
+    row_error_stage[idx]="${10}"
+  }
 
-for i in $(seq 1 "$TX_TOTAL"); do
-  if [[ "$i" -le "$fail_count" ]]; then
-    tx_type="fail"
-    key="$KEY_FAIL"
-    to="$TO_FAIL"
-  else
-    tx_type="keep"
-    key="$KEY_KEEP"
-    to="$TO_KEEP"
-  fi
-
-  send_ts_ns=$(date +%s%N)
-  send_out=$(cast send "$to" --value 0.001ether --private-key "$key" --rpc-url "$RPC_URL" --json 2>&1 || true)
-  tx_hash=$(jq -r '.transactionHash // empty' <<<"$send_out" 2>/dev/null || true)
-
-  if [[ -z "$tx_hash" ]]; then
-    err=$(echo "$send_out" | tr '\n' ' ' | sed 's/,/;/g')
-    append_row "$((i-1))" "$i" "$tx_type" "$send_ts_ns" "" "" "" "" "$err" "send"
-  else
-    append_row "$((i-1))" "$i" "$tx_type" "$send_ts_ns" "$tx_hash" "" "" "" "" ""
-    pending_indices+=("$((i-1))")
-    if [[ "$SEND_MODE" == "sequential" ]]; then
-      receipt_line=$(get_receipt "$tx_hash" "$send_ts_ns") || true
-      IFS=',' read -r receipt_status block_number latency_ms err err_stage <<<"$receipt_line"
-      append_row "$((i-1))" "$i" "$tx_type" "$send_ts_ns" "$tx_hash" "$receipt_status" "$block_number" "$latency_ms" "$err" "$err_stage"
+  for i in $(seq 1 "$TX_TOTAL"); do
+    if [[ "$i" -le "$fail_count" ]]; then
+      tx_type="fail"
+      key="$KEY_FAIL"
+      to="$TO_FAIL"
+    else
+      tx_type="keep"
+      key="$KEY_KEEP"
+      to="$TO_KEEP"
     fi
-  fi
 
-  python3 - <<PY
+    send_ts_ns=$(date +%s%N)
+    send_out=$(cast send "$to" --value 0.001ether --private-key "$key" --rpc-url "$RPC_URL" --json 2>&1 || true)
+    tx_hash=$(jq -r '.transactionHash // empty' <<<"$send_out" 2>/dev/null || true)
+
+    if [[ -z "$tx_hash" ]]; then
+      err=$(sanitize_csv_field "$(echo "$send_out" | tr '\n' ' ')")
+      append_row "$((i-1))" "$i" "$tx_type" "$send_ts_ns" "" "" "" "" "$err" "send"
+    else
+      append_row "$((i-1))" "$i" "$tx_type" "$send_ts_ns" "$tx_hash" "" "" "" "" ""
+      pending_indices+=("$((i-1))")
+      if [[ "$SEND_MODE" == "sequential" ]]; then
+        receipt_line=$(get_receipt "$tx_hash" "$send_ts_ns") || true
+        IFS=',' read -r receipt_status block_number latency_ms err err_stage <<<"$receipt_line"
+        append_row "$((i-1))" "$i" "$tx_type" "$send_ts_ns" "$tx_hash" "$receipt_status" "$block_number" "$latency_ms" "$err" "$err_stage"
+      fi
+    fi
+
+    python3 - <<PY
 import time
 time.sleep(float("$interval"))
 PY
-done
-
-if [[ "$SEND_MODE" == "deferred" ]]; then
-  for idx in "${pending_indices[@]}"; do
-    tx_hash="${row_tx_hash[idx]}"
-    send_ts_ns="${row_send_ts[idx]}"
-    receipt_line=$(get_receipt "$tx_hash" "$send_ts_ns") || true
-    IFS=',' read -r receipt_status block_number latency_ms err err_stage <<<"$receipt_line"
-    append_row "$idx" "${row_seq[idx]}" "${row_tx_type[idx]}" "$send_ts_ns" "$tx_hash" "$receipt_status" "$block_number" "$latency_ms" "$err" "$err_stage"
   done
-fi
 
-for i in $(seq 0 $((TX_TOTAL - 1))); do
-  echo "${row_seq[i]},${row_tx_type[i]},${row_send_ts[i]},${row_tx_hash[i]},${row_receipt_status[i]},${row_block_number[i]},${row_latency_ms[i]},${row_error[i]},${row_error_stage[i]}" >> "$OUT_CSV"
-done
+  if [[ "$SEND_MODE" == "deferred" ]]; then
+    for idx in "${pending_indices[@]}"; do
+      tx_hash="${row_tx_hash[idx]}"
+      send_ts_ns="${row_send_ts[idx]}"
+      receipt_line=$(get_receipt "$tx_hash" "$send_ts_ns") || true
+      IFS=',' read -r receipt_status block_number latency_ms err err_stage <<<"$receipt_line"
+      append_row "$idx" "${row_seq[idx]}" "${row_tx_type[idx]}" "$send_ts_ns" "$tx_hash" "$receipt_status" "$block_number" "$latency_ms" "$err" "$err_stage"
+    done
+  fi
+
+  for i in $(seq 0 $((TX_TOTAL - 1))); do
+    echo "${row_seq[i]},${row_tx_type[i]},${row_send_ts[i]},${row_tx_hash[i]},${row_receipt_status[i]},${row_block_number[i]},${row_latency_ms[i]},${row_error[i]},${row_error_stage[i]}" >> "$OUT_CSV"
+  done
+}
+
+run_concurrent_mode() {
+  local fail_count
+  fail_count=$(python3 - <<PY
+total=int("$TX_TOTAL")
+ratio=float("$FAIL_RATIO")
+print(int(total * ratio))
+PY
+)
+
+  local concurrency_limit="$CONCURRENCY"
+  if [[ -z "$concurrency_limit" || "$concurrency_limit" -le 0 ]]; then
+    concurrency_limit="$TX_TOTAL"
+  fi
+
+  local keep_nonce fail_nonce
+  keep_nonce=$(get_nonce_for_key "$KEY_KEEP")
+  fail_nonce=$(get_nonce_for_key "$KEY_FAIL")
+
+  local workdir send_dir receipt_dir
+  workdir=$(mktemp -d /tmp/nitro_send_workload.XXXXXX)
+  send_dir="$workdir/send"
+  receipt_dir="$workdir/receipt"
+  mkdir -p "$send_dir" "$receipt_dir"
+  trap 'rm -rf "$workdir"' EXIT
+
+  local keep_next_nonce fail_next_nonce
+  keep_next_nonce=$((keep_nonce))
+  fail_next_nonce=$((fail_nonce))
+
+  for i in $(seq 1 "$TX_TOTAL"); do
+    if [[ "$i" -le "$fail_count" ]]; then
+      tx_type="fail"
+      key="$KEY_FAIL"
+      to="$TO_FAIL"
+      nonce="$fail_next_nonce"
+      fail_next_nonce=$((fail_next_nonce + 1))
+    else
+      tx_type="keep"
+      key="$KEY_KEEP"
+      to="$TO_KEEP"
+      nonce="$keep_next_nonce"
+      keep_next_nonce=$((keep_next_nonce + 1))
+    fi
+
+    submit_tx "$i" "$tx_type" "$key" "$to" "$nonce" "$send_dir/$i" &
+    throttle_jobs "$concurrency_limit"
+  done
+  wait
+
+  for i in $(seq 1 "$TX_TOTAL"); do
+    if read -r seq tx_type send_ts_ns tx_hash send_error send_error_stage < "$send_dir/$i"; then
+      if [[ -z "$tx_hash" ]]; then
+        write_final_file "$receipt_dir/$i" "$seq" "$tx_type" "$send_ts_ns" "" "" "" "" "$send_error" "$send_error_stage"
+      else
+        poll_tx_receipt "$send_dir/$i" "$receipt_dir/$i" &
+        throttle_jobs "$concurrency_limit"
+      fi
+    else
+      echo "missing send result for seq $i" >&2
+      exit 1
+    fi
+  done
+  wait
+
+  for i in $(seq 1 "$TX_TOTAL"); do
+    IFS='|' read -r seq tx_type send_ts_ns tx_hash receipt_status block_number latency_ms error error_stage < "$receipt_dir/$i"
+    echo "$seq,$tx_type,$send_ts_ns,$tx_hash,$receipt_status,$block_number,$latency_ms,$error,$error_stage" >> "$OUT_CSV"
+  done
+}
+
+case "$SEND_MODE" in
+  sequential|deferred)
+    run_legacy_mode
+    ;;
+  concurrent|burst)
+    run_concurrent_mode
+    ;;
+  *)
+    echo "unknown send mode: $SEND_MODE" >&2
+    exit 1
+    ;;
+esac

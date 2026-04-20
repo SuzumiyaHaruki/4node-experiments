@@ -11,7 +11,8 @@
     "max_rebuild_rounds": 3,
     "tx_total": 120,
     "tps": 20,
-    "send_mode": "deferred",
+    "send_mode": "concurrent",
+    "concurrency": 20,
     "fail_ratio": 0.0,
     "fault": "none"
   },
@@ -27,7 +28,8 @@
     "max_rebuild_rounds": 3,
     "tx_total": 120,
     "tps": 20,
-    "send_mode": "deferred",
+    "send_mode": "concurrent",
+    "concurrency": 20,
     "fail_ratio": 0.0,
     "fault": "none"
   },
@@ -43,7 +45,8 @@
     "max_rebuild_rounds": 3,
     "tx_total": 120,
     "tps": 20,
-    "send_mode": "deferred",
+    "send_mode": "concurrent",
+    "concurrency": 20,
     "fail_ratio": 0.0,
     "fault": "none"
   },
@@ -59,7 +62,8 @@
     "max_rebuild_rounds": 3,
     "tx_total": 120,
     "tps": 20,
-    "send_mode": "deferred",
+    "send_mode": "concurrent",
+    "concurrency": 20,
     "fail_ratio": 0.1,
     "fault": "none"
   },
@@ -75,7 +79,8 @@
     "max_rebuild_rounds": 3,
     "tx_total": 120,
     "tps": 20,
-    "send_mode": "deferred",
+    "send_mode": "concurrent",
+    "concurrency": 20,
     "fail_ratio": 0.3,
     "fault": "none"
   }

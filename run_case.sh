@@ -39,6 +39,7 @@ tps="$(jq -r '.tps' <<<"$case_json")"
 fail_ratio="$(jq -r '.fail_ratio' <<<"$case_json")"
 fault="$(jq -r '.fault' <<<"$case_json")"
 send_mode="$(jq -r '.send_mode // "sequential"' <<<"$case_json")"
+concurrency="$(jq -r '.concurrency // empty' <<<"$case_json")"
 batching_window_ms="$(jq -r '.batching_window_ms // empty' <<<"$case_json")"
 endorsement_mode="$(jq -r '.mode // empty' <<<"$case_json")"
 default_threshold="$(jq -r '.default_threshold // empty' <<<"$case_json")"
@@ -71,17 +72,23 @@ if [[ "$fault" != "none" ]]; then
   ./fault_injector.sh apply "$fault" "$FAULT_STATUS_DIR"
 fi
 
-./send_workload.sh \
-  --rpc "$NODE1_RPC_URL" \
-  --tx-total "$tx_total" \
-  --tps "$tps" \
-  --fail-ratio "$fail_ratio" \
-  --send-mode "$send_mode" \
-  --out "$case_dir/tx_results.csv" \
-  --key-keep "$KEY_KEEP" \
-  --key-fail "$KEY_FAIL" \
-  --to-keep "$TO_KEEP" \
+send_args=(
+  --rpc "$NODE1_RPC_URL"
+  --tx-total "$tx_total"
+  --tps "$tps"
+  --fail-ratio "$fail_ratio"
+  --send-mode "$send_mode"
+  --out "$case_dir/tx_results.csv"
+  --key-keep "$KEY_KEEP"
+  --key-fail "$KEY_FAIL"
+  --to-keep "$TO_KEEP"
   --to-fail "$TO_FAIL"
+)
+if [[ -n "$concurrency" ]]; then
+  send_args+=(--concurrency "$concurrency")
+fi
+
+./send_workload.sh "${send_args[@]}"
 
 if [[ "$fault" != "none" ]]; then
   ./fault_injector.sh clear "$fault" "$FAULT_STATUS_DIR" || true
