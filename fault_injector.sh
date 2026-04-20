@@ -128,7 +128,7 @@ if [[ "$ACTION" == "apply" ]]; then
     IFS=',' read -ra ARR <<< "${BASH_REMATCH[1]}"
     for node in "${ARR[@]}"; do
       target="$(node_ssh "$node")"
-      ssh_node "$target" "pkill -f '/data/endorsement/bin/endorser' || true; pkill -f '/data/endorsement/bin/nitro-val' || true"
+      ssh_node "$target" "pkill -x endorser || true; pkill -x nitro-val || true"
     done
     write_status "applied" "nodes stopped: ${BASH_REMATCH[1]}"
     echo "[*] applied down fault: ${BASH_REMATCH[1]}"
