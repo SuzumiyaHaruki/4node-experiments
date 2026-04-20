@@ -120,7 +120,7 @@ NODE2_SSH=root@192.168.1.13 NODE3_SSH=root@192.168.1.6 NODE4_SSH=root@192.168.1.
 注意：
 
 - `threshold` 会在每个 case 前重新 bootstrap `node-1`，然后重新准备该 case 的账户文件，再发送 workload。
-- `fault` 会在进入 fault 矩阵前重新准备账户池，避免上一个实验阶段留下的 nonce 缓存影响后续发送。
+- `fault` 会在进入 fault 矩阵前先把 `node-1` 重新 bootstrap 到 `2-of-3`，然后重新准备账户池，避免上一个实验阶段留下的运行态和 nonce 缓存影响后续发送。
 
 ## 前置条件
 
@@ -303,6 +303,8 @@ NODE1_BOOTSTRAP_CMD='DEFAULT_THRESHOLD=3 STRICT_THRESHOLD=3 bash /home/nitro/Des
 
 当前默认的 fault 矩阵比之前更温和一些：`tx_total=40`、`tps=2`、`fail_ratio=0.05`，`batching_window_ms=2000`，`block_endorsement_timeout_ms=5000`，`max_rebuild_rounds=5`。
 
+在跑 fault 矩阵之前，`run_all_experiments.sh` 会先把 `node-1` 重新 bootstrap 到 `DEFAULT_THRESHOLD=2`、`STRICT_THRESHOLD=3` 的运行态，这样不会继承 threshold 阶段留下的 `3-of-3` 配置。
+
 推荐直接跑整张矩阵：
 
 ```bash
@@ -351,6 +353,12 @@ SSH_PASSWORD='your-password' FAULT_NETDEV=ens3 ./run_matrix.sh ./matrix_fault.js
 
 ```bash
 ./run_case.sh ./matrix_fault.json fault_delay_100ms ./accounts_pool/fault_delay_100ms.env ./results/fault
+```
+
+如果你是从 threshold 或其它更严格的运行态切过来，单独跑 fault case 之前也建议先手动把 `node-1` 切回 `2-of-3`，例如：
+
+```bash
+DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 bash /home/nitro/Desktop/endorsement/scripts/node1_redeploy.sh
 ```
 
 ### 统一产物
