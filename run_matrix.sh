@@ -9,7 +9,8 @@ NODE1_BOOTSTRAP_CMD="${NODE1_BOOTSTRAP_CMD:-}"
 mkdir -p "$OUT_DIR"
 ./prepare_accounts_pool.sh "$MATRIX_JSON" "$ACCOUNTS_DIR"
 
-jq -r '.[].name' "$MATRIX_JSON" | while read -r case_name; do
+mapfile -t CASE_NAMES < <(jq -r '.[].name' "$MATRIX_JSON")
+for case_name in "${CASE_NAMES[@]}"; do
   echo "[*] running case: $case_name"
   ./run_case.sh "$MATRIX_JSON" "$case_name" "$ACCOUNTS_DIR/$case_name.env" "$OUT_DIR"
 done

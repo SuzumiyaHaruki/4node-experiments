@@ -23,9 +23,9 @@ detect_netdev() {
     return 0
   fi
 
-  dev=$(ssh -o StrictHostKeyChecking=no "$host" "ip -o route show default | awk 'NR==1{print \$5}'" 2>/dev/null || true)
+  dev=$(ssh_node "$host" "ip -o route show default | awk 'NR==1{print \$5}'" 2>/dev/null || true")
   if [[ -z "$dev" ]]; then
-    dev=$(ssh -o StrictHostKeyChecking=no "$host" "ip -o -4 route get 1.1.1.1 | awk '{for (i=1; i<=NF; i++) if (\$i==\"dev\") {print \$(i+1); exit}}'" 2>/dev/null || true)
+    dev=$(ssh_node "$host" "ip -o -4 route get 1.1.1.1 | awk '{for (i=1; i<=NF; i++) if (\$i==\"dev\") {print \$(i+1); exit}}'" 2>/dev/null || true)
   fi
   if [[ -z "$dev" ]]; then
     echo "eth0"
@@ -43,14 +43,15 @@ STATUS_FILE="$STATUS_DIR/${FAULT_KEY}.status"
 ssh_node() {
   local target="$1"
   shift
+  local ssh_opts=(-o StrictHostKeyChecking=no -n)
   if [[ -n "$SSH_PASSWORD" ]]; then
     if ! command -v sshpass >/dev/null 2>&1; then
       echo "sshpass is required when SSH_PASSWORD is set" >&2
       exit 1
     fi
-    sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$target" "$@"
+    sshpass -p "$SSH_PASSWORD" ssh "${ssh_opts[@]}" "$target" "$@"
   else
-    ssh -o StrictHostKeyChecking=no "$target" "$@"
+    ssh "${ssh_opts[@]}" "$target" "$@"
   fi
 }
 
