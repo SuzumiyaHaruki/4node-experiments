@@ -10,6 +10,7 @@ KEY_KEEP=""
 KEY_FAIL=""
 TO_KEEP=""
 TO_FAIL=""
+SEND_MODE="sequential"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,6 +23,7 @@ while [[ $# -gt 0 ]]; do
     --key-fail) KEY_FAIL="$2"; shift 2 ;;
     --to-keep) TO_KEEP="$2"; shift 2 ;;
     --to-fail) TO_FAIL="$2"; shift 2 ;;
+    --send-mode) SEND_MODE="$2"; shift 2 ;;
     *) echo "unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -70,6 +72,22 @@ print(int(total * ratio))
 PY
 )
 
+declare -a row_seq row_tx_type row_send_ts row_tx_hash row_receipt_status row_block_number row_latency_ms row_error row_error_stage row_tx_kind
+pending_indices=()
+
+append_row() {
+  local idx="$1"
+  row_seq[idx]="$2"
+  row_tx_type[idx]="$3"
+  row_send_ts[idx]="$4"
+  row_tx_hash[idx]="$5"
+  row_receipt_status[idx]="$6"
+  row_block_number[idx]="$7"
+  row_latency_ms[idx]="$8"
+  row_error[idx]="$9"
+  row_error_stage[idx]="${10}"
+}
+
 for i in $(seq 1 "$TX_TOTAL"); do
   if [[ "$i" -le "$fail_count" ]]; then
     tx_type="fail"
@@ -87,14 +105,33 @@ for i in $(seq 1 "$TX_TOTAL"); do
 
   if [[ -z "$tx_hash" ]]; then
     err=$(echo "$send_out" | tr '\n' ' ' | sed 's/,/;/g')
-    echo "$i,$tx_type,$send_ts_ns,,,,\"$err\",send" >> "$OUT_CSV"
+    append_row "$((i-1))" "$i" "$tx_type" "$send_ts_ns" "" "" "" "" "$err" "send"
   else
-    receipt_line=$(get_receipt "$tx_hash" "$send_ts_ns")
-    echo "$i,$tx_type,$send_ts_ns,$tx_hash,$receipt_line" >> "$OUT_CSV"
+    append_row "$((i-1))" "$i" "$tx_type" "$send_ts_ns" "$tx_hash" "" "" "" "" ""
+    pending_indices+=("$((i-1))")
+    if [[ "$SEND_MODE" == "sequential" ]]; then
+      receipt_line=$(get_receipt "$tx_hash" "$send_ts_ns") || true
+      IFS=',' read -r receipt_status block_number latency_ms err err_stage <<<"$receipt_line"
+      append_row "$((i-1))" "$i" "$tx_type" "$send_ts_ns" "$tx_hash" "$receipt_status" "$block_number" "$latency_ms" "$err" "$err_stage"
+    fi
   fi
 
   python3 - <<PY
 import time
 time.sleep(float("$interval"))
 PY
+done
+
+if [[ "$SEND_MODE" == "deferred" ]]; then
+  for idx in "${pending_indices[@]}"; do
+    tx_hash="${row_tx_hash[idx]}"
+    send_ts_ns="${row_send_ts[idx]}"
+    receipt_line=$(get_receipt "$tx_hash" "$send_ts_ns") || true
+    IFS=',' read -r receipt_status block_number latency_ms err err_stage <<<"$receipt_line"
+    append_row "$idx" "${row_seq[idx]}" "${row_tx_type[idx]}" "$send_ts_ns" "$tx_hash" "$receipt_status" "$block_number" "$latency_ms" "$err" "$err_stage"
+  done
+fi
+
+for i in $(seq 0 $((TX_TOTAL - 1))); do
+  echo "${row_seq[i]},${row_tx_type[i]},${row_send_ts[i]},${row_tx_hash[i]},${row_receipt_status[i]},${row_block_number[i]},${row_latency_ms[i]},${row_error[i]},${row_error_stage[i]}" >> "$OUT_CSV"
 done

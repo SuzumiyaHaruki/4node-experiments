@@ -38,10 +38,33 @@ tx_total="$(jq -r '.tx_total' <<<"$case_json")"
 tps="$(jq -r '.tps' <<<"$case_json")"
 fail_ratio="$(jq -r '.fail_ratio' <<<"$case_json")"
 fault="$(jq -r '.fault' <<<"$case_json")"
+send_mode="$(jq -r '.send_mode // "sequential"' <<<"$case_json")"
+batching_window_ms="$(jq -r '.batching_window_ms // empty' <<<"$case_json")"
+endorsement_mode="$(jq -r '.mode // empty' <<<"$case_json")"
+default_threshold="$(jq -r '.default_threshold // empty' <<<"$case_json")"
+strict_threshold="$(jq -r '.strict_threshold // empty' <<<"$case_json")"
+default_aggregation="$(jq -r '.default_aggregation // empty' <<<"$case_json")"
+strict_aggregation="$(jq -r '.strict_aggregation // empty' <<<"$case_json")"
+block_endorsement_timeout_ms="$(jq -r '.block_endorsement_timeout_ms // empty' <<<"$case_json")"
+max_rebuild_rounds="$(jq -r '.max_rebuild_rounds // empty' <<<"$case_json")"
+
+bootstrap_env=()
+[[ -n "$batching_window_ms" ]] && bootstrap_env+=("BATCHING_WINDOW_MS=$batching_window_ms")
+[[ -n "$endorsement_mode" ]] && bootstrap_env+=("ENDORSEMENT_MODE=$endorsement_mode")
+[[ -n "$default_threshold" ]] && bootstrap_env+=("DEFAULT_THRESHOLD=$default_threshold")
+[[ -n "$strict_threshold" ]] && bootstrap_env+=("STRICT_THRESHOLD=$strict_threshold")
+[[ -n "$default_aggregation" ]] && bootstrap_env+=("DEFAULT_AGGREGATION=$default_aggregation")
+[[ -n "$strict_aggregation" ]] && bootstrap_env+=("STRICT_AGGREGATION=$strict_aggregation")
+[[ -n "$block_endorsement_timeout_ms" ]] && bootstrap_env+=("BLOCK_ENDORSEMENT_TIMEOUT_MS=$block_endorsement_timeout_ms")
+[[ -n "$max_rebuild_rounds" ]] && bootstrap_env+=("MAX_REBUILD_ROUNDS=$max_rebuild_rounds")
+bootstrap_prefix=""
+if [[ ${#bootstrap_env[@]} -gt 0 ]]; then
+  bootstrap_prefix="${bootstrap_env[*]} "
+fi
 
 if [[ -n "$NODE1_BOOTSTRAP_CMD" ]]; then
   echo "[*] bootstrapping node-1 for case=$CASE_NAME"
-  bash -lc "$NODE1_BOOTSTRAP_CMD"
+  bash -lc "${bootstrap_prefix}${NODE1_BOOTSTRAP_CMD}"
 fi
 
 if [[ "$fault" != "none" ]]; then
@@ -53,6 +76,7 @@ fi
   --tx-total "$tx_total" \
   --tps "$tps" \
   --fail-ratio "$fail_ratio" \
+  --send-mode "$send_mode" \
   --out "$case_dir/tx_results.csv" \
   --key-keep "$KEY_KEEP" \
   --key-fail "$KEY_FAIL" \
