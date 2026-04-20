@@ -189,9 +189,13 @@ cd /home/nitro/Desktop/experiments
 - `NODE2_SSH`
 - `NODE3_SSH`
 - `NODE4_SSH`
+- `SSH_PASSWORD`
+  - 如果三台机器还在使用密码登录，可以配合 `sshpass` 使用，避免每次手动输入
 - `NODE2_START_CMD`
 - `NODE3_START_CMD`
 - `NODE4_START_CMD`
+- `FAULT_NETDEV`
+  - 如果自动探测到的网卡不对，可以显式指定，例如 `ens3`
 
 ## 推荐实验顺序
 
@@ -240,7 +244,7 @@ cd /home/nitro/Desktop/experiments
 
 目标是观察不同流量和失败比例下的延迟、吞吐和成功率。
 
-这一组现在使用 `send_mode=deferred`，也就是先把一批交易快速发出去，再统一等回执。这样更容易把约 20 笔交易压进同一个区块，观察 `10% fail` 和 `30% fail` 的差异。
+这一组现在使用 `send_mode=deferred`，也就是先把一批交易快速发出去，再统一等回执。当前默认配置把 `tx_total` 提到 `120`，`tps` 提到 `20`，并把 batching window 调到 `1.2 秒`，这样更容易把大约 20 笔交易压进同一个区块，观察 `10% fail` 和 `30% fail` 的差异。
 
 同时，`run_all_experiments.sh` 在进入 performance 矩阵前会先把 `node-1` 切到 1 秒 batching window 的 burst 配置，但不会清掉链上余额和账户。
 
@@ -259,8 +263,8 @@ cd /home/nitro/Desktop/experiments
 - `perf_remote_mixed_10pct_fail`
 - `perf_remote_mixed_30pct_fail`
 
-这些 case 默认的 `tx_total` 都是 100，`tps` 都是 5。  
-如果你想自己做一个更小的 smoke test，可以单独跑一个 case 再把 `tx_total` 改小一点，先确认链路没问题。
+这些 case 默认的 `tx_total` 都是 120，`tps` 都是 20，`send_mode` 都是 `deferred`。  
+如果你想自己做一个更小的 smoke test，可以单独跑一个 case，再把 `tx_total` 和 `tps` 改小一点，先确认链路没问题。
 
 ### 3. Threshold
 
@@ -326,6 +330,20 @@ cd /home/nitro/Desktop/experiments
    - `bash /data/node2_start.sh`
    - `bash /data/node3_start.sh`
    - `bash /data/node4_start.sh`
+
+`fault_injector.sh` 会优先自动探测目标机器的默认出口网卡。如果你的机器没有 `eth0`，也不用改脚本本身，直接在运行时覆盖即可：
+
+```bash
+FAULT_NETDEV=ens3 ./run_matrix.sh ./matrix_fault.json ./results/fault
+```
+
+如果你的 SSH 还是密码登录，也可以在运行时提供密码：
+
+```bash
+SSH_PASSWORD='your-password' FAULT_NETDEV=ens3 ./run_matrix.sh ./matrix_fault.json ./results/fault
+```
+
+前提是本机已安装 `sshpass`。如果你已经配好了 SSH key，建议继续用 key 登录，更安全也更稳定。
 
 如果你想单独验证某个故障，也可以直接跑单个 case：
 

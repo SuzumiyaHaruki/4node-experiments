@@ -8,10 +8,31 @@ STATUS_DIR="${3:-./.fault_status}"
 NODE2_SSH="${NODE2_SSH:-root@192.168.1.13}"
 NODE3_SSH="${NODE3_SSH:-root@192.168.1.6}"
 NODE4_SSH="${NODE4_SSH:-root@192.168.1.4}"
+SSH_PASSWORD="${SSH_PASSWORD:-}"
 
 NODE2_START_CMD="${NODE2_START_CMD:-bash /data/node2_start.sh}"
 NODE3_START_CMD="${NODE3_START_CMD:-bash /data/node3_start.sh}"
 NODE4_START_CMD="${NODE4_START_CMD:-bash /data/node4_start.sh}"
+FAULT_NETDEV="${FAULT_NETDEV:-}"
+
+detect_netdev() {
+  local host="$1"
+  local dev=""
+  if [[ -n "$FAULT_NETDEV" ]]; then
+    echo "$FAULT_NETDEV"
+    return 0
+  fi
+
+  dev=$(ssh -o StrictHostKeyChecking=no "$host" "ip -o route show default | awk 'NR==1{print \$5}'" 2>/dev/null || true)
+  if [[ -z "$dev" ]]; then
+    dev=$(ssh -o StrictHostKeyChecking=no "$host" "ip -o -4 route get 1.1.1.1 | awk '{for (i=1; i<=NF; i++) if (\$i==\"dev\") {print \$(i+1); exit}}'" 2>/dev/null || true)
+  fi
+  if [[ -z "$dev" ]]; then
+    echo "eth0"
+  else
+    echo "$dev"
+  fi
+}
 
 mkdir -p "$STATUS_DIR"
 
@@ -22,7 +43,15 @@ STATUS_FILE="$STATUS_DIR/${FAULT_KEY}.status"
 ssh_node() {
   local target="$1"
   shift
-  ssh -o StrictHostKeyChecking=no "$target" "$@"
+  if [[ -n "$SSH_PASSWORD" ]]; then
+    if ! command -v sshpass >/dev/null 2>&1; then
+      echo "sshpass is required when SSH_PASSWORD is set" >&2
+      exit 1
+    fi
+    sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$target" "$@"
+  else
+    ssh -o StrictHostKeyChecking=no "$target" "$@"
+  fi
 }
 
 node_ssh() {
@@ -66,9 +95,10 @@ if [[ "$ACTION" == "apply" ]]; then
     delay="${BASH_REMATCH[2]}"
     target="$(node_ssh "$node")"
     ms="${delay%ms}"
-    ssh_node "$target" "tc qdisc del dev eth0 root 2>/dev/null || true; tc qdisc add dev eth0 root netem delay ${ms}ms"
+    netdev="$(detect_netdev "$target")"
+    ssh_node "$target" "tc qdisc del dev '$netdev' root 2>/dev/null || true; tc qdisc add dev '$netdev' root netem delay ${ms}ms"
     write_status "applied" "delay ${ms}ms applied to ${node}"
-    echo "[*] applied delay fault: ${node} ${ms}ms"
+    echo "[*] applied delay fault: ${node} ${ms}ms on ${netdev}"
     exit 0
   fi
 
@@ -92,9 +122,10 @@ if [[ "$ACTION" == "clear" ]]; then
   if [[ "$FAULT" =~ ^delay:([^:]+):([^:]+)$ ]]; then
     node="${BASH_REMATCH[1]}"
     target="$(node_ssh "$node")"
-    ssh_node "$target" "tc qdisc del dev eth0 root 2>/dev/null || true"
+    netdev="$(detect_netdev "$target")"
+    ssh_node "$target" "tc qdisc del dev '$netdev' root 2>/dev/null || true"
     write_status "cleared" "delay cleared for ${node}"
-    echo "[*] cleared delay fault for ${node}"
+    echo "[*] cleared delay fault for ${node} on ${netdev}"
     exit 0
   fi
 
