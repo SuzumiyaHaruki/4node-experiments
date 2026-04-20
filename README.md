@@ -301,6 +301,8 @@ NODE1_BOOTSTRAP_CMD='DEFAULT_THRESHOLD=3 STRICT_THRESHOLD=3 bash /home/nitro/Des
 
 目标是验证延迟和宕机故障下的系统表现。
 
+当前默认的 fault 矩阵比之前更温和一些：`tx_total=40`、`tps=2`、`fail_ratio=0.05`，`batching_window_ms=2000`，`block_endorsement_timeout_ms=5000`，`max_rebuild_rounds=5`。
+
 推荐直接跑整张矩阵：
 
 ```bash

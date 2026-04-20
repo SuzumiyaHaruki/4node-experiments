@@ -11,6 +11,12 @@ FUND_AMOUNT="${FUND_AMOUNT:-3ether}"
 NONCE_CACHE_FILE="${NONCE_CACHE_FILE:-/tmp/nitro_prepare_accounts_funder_nonce}"
 PERF_BATCHING_WINDOW_MS="${PERF_BATCHING_WINDOW_MS:-1200}"
 PERF_BOOTSTRAP_CMD="${PERF_BOOTSTRAP_CMD:-RESET_CHAIN=0 BATCHING_WINDOW_MS=${PERF_BATCHING_WINDOW_MS} ENDORSEMENT_MODE=remote DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 DEFAULT_AGGREGATION=bls STRICT_AGGREGATION=bls BLOCK_ENDORSEMENT_TIMEOUT_MS=2000 MAX_REBUILD_ROUNDS=3 bash ${NODE1_BOOTSTRAP_SCRIPT}}"
+FAULT_TX_TOTAL="${FAULT_TX_TOTAL:-40}"
+FAULT_TPS="${FAULT_TPS:-2}"
+FAULT_FAIL_RATIO="${FAULT_FAIL_RATIO:-0.05}"
+FAULT_BATCHING_WINDOW_MS="${FAULT_BATCHING_WINDOW_MS:-2000}"
+FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS="${FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS:-5000}"
+FAULT_MAX_REBUILD_ROUNDS="${FAULT_MAX_REBUILD_ROUNDS:-5}"
 NODE2_SSH="${NODE2_SSH:-root@192.168.1.13}"
 NODE3_SSH="${NODE3_SSH:-root@192.168.1.6}"
 NODE4_SSH="${NODE4_SSH:-root@192.168.1.4}"
@@ -60,7 +66,33 @@ for case_name in threshold_2of3_fail20 threshold_3of3_fail20 threshold_2of3_fail
 done
 
 echo "[*] running fault matrix"
+FAULT_MATRIX_FILE="$(mktemp /tmp/nitro_fault_matrix.XXXXXX.json)"
+trap 'rm -f "$FAULT_MATRIX_FILE"' EXIT
+jq \
+  --argjson tx_total "$FAULT_TX_TOTAL" \
+  --argjson tps "$FAULT_TPS" \
+  --argjson fail_ratio "$FAULT_FAIL_RATIO" \
+  --argjson batching_window_ms "$FAULT_BATCHING_WINDOW_MS" \
+  --argjson block_endorsement_timeout_ms "$FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS" \
+  --argjson max_rebuild_rounds "$FAULT_MAX_REBUILD_ROUNDS" \
+  '
+    map(
+      if (.name | startswith("fault_")) then
+        .tx_total = $tx_total
+        | .tps = $tps
+        | .fail_ratio = $fail_ratio
+        | .batching_window_ms = $batching_window_ms
+        | .block_endorsement_timeout_ms = $block_endorsement_timeout_ms
+        | .max_rebuild_rounds = $max_rebuild_rounds
+      else
+        .
+      end
+    )
+  ' \
+  "$ROOT_DIR/matrix_fault.json" > "$FAULT_MATRIX_FILE"
+
+echo "[*] fault defaults: tx_total=$FAULT_TX_TOTAL tps=$FAULT_TPS fail_ratio=$FAULT_FAIL_RATIO batching_window_ms=$FAULT_BATCHING_WINDOW_MS timeout_ms=$FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS max_rebuild_rounds=$FAULT_MAX_REBUILD_ROUNDS"
 NODE2_SSH="$NODE2_SSH" NODE3_SSH="$NODE3_SSH" NODE4_SSH="$NODE4_SSH" SSH_PASSWORD="$SSH_PASSWORD" \
-  run_matrix_case "$ROOT_DIR/matrix_fault.json" "$RESULTS_DIR/fault"
+  run_matrix_case "$FAULT_MATRIX_FILE" "$RESULTS_DIR/fault"
 
 echo "[*] all experiments finished, results in $RESULTS_DIR"
