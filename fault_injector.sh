@@ -15,25 +15,6 @@ NODE3_START_CMD="${NODE3_START_CMD:-bash /data/node3_start.sh}"
 NODE4_START_CMD="${NODE4_START_CMD:-bash /data/node4_start.sh}"
 FAULT_NETDEV="${FAULT_NETDEV:-}"
 
-detect_netdev() {
-  local host="$1"
-  local dev=""
-  if [[ -n "$FAULT_NETDEV" ]]; then
-    echo "$FAULT_NETDEV"
-    return 0
-  fi
-
-  dev=$(ssh_node "$host" "ip -o route show default | awk 'NR==1{print \$5}'" 2>/dev/null || true")
-  if [[ -z "$dev" ]]; then
-    dev=$(ssh_node "$host" "ip -o -4 route get 1.1.1.1 | awk '{for (i=1; i<=NF; i++) if (\$i==\"dev\") {print \$(i+1); exit}}'" 2>/dev/null || true)
-  fi
-  if [[ -z "$dev" ]]; then
-    echo "eth0"
-  else
-    echo "$dev"
-  fi
-}
-
 mkdir -p "$STATUS_DIR"
 
 safe_fault_name() { echo "$1" | sed 's#[/:, ]#_#g'; }
@@ -43,15 +24,15 @@ STATUS_FILE="$STATUS_DIR/${FAULT_KEY}.status"
 ssh_node() {
   local target="$1"
   shift
-  local ssh_opts=(-o StrictHostKeyChecking=no -n)
+  local ssh_cmd=(ssh -o StrictHostKeyChecking=no -n)
   if [[ -n "$SSH_PASSWORD" ]]; then
     if ! command -v sshpass >/dev/null 2>&1; then
       echo "sshpass is required when SSH_PASSWORD is set" >&2
       exit 1
     fi
-    sshpass -p "$SSH_PASSWORD" ssh "${ssh_opts[@]}" "$target" "$@"
+    sshpass -p "$SSH_PASSWORD" "${ssh_cmd[@]}" "$target" "$@"
   else
-    ssh "${ssh_opts[@]}" "$target" "$@"
+    "${ssh_cmd[@]}" "$target" "$@"
   fi
 }
 
@@ -73,6 +54,31 @@ node_restart_cmd() {
   esac
 }
 
+detect_netdev() {
+  local host="$1"
+  local dev=""
+  if [[ -n "$FAULT_NETDEV" ]]; then
+    echo "$FAULT_NETDEV"
+    return 0
+  fi
+
+  dev=$(
+    ssh_node "$host" sh -s 2>/dev/null <<'EOF' || true
+if ip -o route show default >/dev/null 2>&1; then
+  ip -o route show default | awk 'NR==1{print $5; exit}'
+else
+  ip -o -4 route get 1.1.1.1 | awk '{for (i=1; i<=NF; i++) if ($i=="dev") {print $(i+1); exit}}'
+fi
+EOF
+  )
+
+  if [[ -z "$dev" ]]; then
+    echo "eth0"
+  else
+    echo "$dev"
+  fi
+}
+
 write_status() {
   local status="$1"
   local msg="${2:-}"
@@ -91,6 +97,7 @@ fi
 
 if [[ "$ACTION" == "apply" ]]; then
   rm -f "$STATUS_FILE"
+
   if [[ "$FAULT" =~ ^delay:([^:]+):([^:]+)$ ]]; then
     node="${BASH_REMATCH[1]}"
     delay="${BASH_REMATCH[2]}"
