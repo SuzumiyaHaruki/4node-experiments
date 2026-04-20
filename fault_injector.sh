@@ -36,6 +36,20 @@ ssh_node() {
   fi
 }
 
+ssh_node_with_stdin() {
+  local target="$1"
+  shift
+  if [[ -n "$SSH_PASSWORD" ]]; then
+    if ! command -v sshpass >/dev/null 2>&1; then
+      echo "sshpass is required when SSH_PASSWORD is set" >&2
+      exit 1
+    fi
+    sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no "$target" "$@"
+  else
+    ssh -o StrictHostKeyChecking=no "$target" "$@"
+  fi
+}
+
 node_ssh() {
   case "$1" in
     node-2) echo "$NODE2_SSH" ;;
@@ -63,7 +77,7 @@ detect_netdev() {
   fi
 
   dev=$(
-    ssh_node "$host" sh -s 2>/dev/null <<'EOF' || true
+    ssh_node_with_stdin "$host" sh -s 2>/dev/null <<'EOF' || true
 if ip -o route show default >/dev/null 2>&1; then
   ip -o route show default | awk 'NR==1{print $5; exit}'
 else
