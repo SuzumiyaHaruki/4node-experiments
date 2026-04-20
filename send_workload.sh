@@ -258,10 +258,9 @@ PY
   fail_nonce=$(get_nonce_for_key "$KEY_FAIL")
 
   SEND_WORKDIR=$(mktemp -d /tmp/nitro_send_workload.XXXXXX)
-  local send_dir receipt_dir
+  local send_dir
   send_dir="$SEND_WORKDIR/send"
-  receipt_dir="$SEND_WORKDIR/receipt"
-  mkdir -p "$send_dir" "$receipt_dir"
+  mkdir -p "$send_dir"
   trap 'rm -rf "$SEND_WORKDIR"' EXIT
 
   local keep_next_nonce fail_next_nonce
@@ -289,23 +288,18 @@ PY
   wait
 
   for i in $(seq 1 "$TX_TOTAL"); do
-    if read -r seq tx_type send_ts_ns tx_hash send_error send_error_stage < "$send_dir/$i"; then
+    if IFS='|' read -r seq tx_type send_ts_ns tx_hash send_error send_error_stage < "$send_dir/$i"; then
       if [[ -z "$tx_hash" ]]; then
-        write_final_file "$receipt_dir/$i" "$seq" "$tx_type" "$send_ts_ns" "" "" "" "" "$send_error" "$send_error_stage"
+        echo "$seq,$tx_type,$send_ts_ns,$tx_hash,,,${send_error},${send_error_stage}" >> "$OUT_CSV"
       else
-        poll_tx_receipt "$send_dir/$i" "$receipt_dir/$i" &
-        throttle_jobs "$concurrency_limit"
+        receipt_line=$(get_receipt "$tx_hash" "$send_ts_ns") || true
+        IFS=',' read -r receipt_status block_number latency_ms err err_stage <<<"$receipt_line"
+        echo "$seq,$tx_type,$send_ts_ns,$tx_hash,$receipt_status,$block_number,$latency_ms,$err,$err_stage" >> "$OUT_CSV"
       fi
     else
       echo "missing send result for seq $i" >&2
       exit 1
     fi
-  done
-  wait
-
-  for i in $(seq 1 "$TX_TOTAL"); do
-    IFS='|' read -r seq tx_type send_ts_ns tx_hash receipt_status block_number latency_ms error error_stage < "$receipt_dir/$i"
-    echo "$seq,$tx_type,$send_ts_ns,$tx_hash,$receipt_status,$block_number,$latency_ms,$error,$error_stage" >> "$OUT_CSV"
   done
 }
 
