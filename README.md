@@ -19,6 +19,7 @@
 - `send_workload.sh`：向 `node-1` 发交易
 - `run_case.sh`：执行单个实验 case
 - `run_matrix.sh`：按矩阵批量执行 case
+- `run_all_experiments.sh`：按顺序执行四类实验
 - `fault_injector.sh`：通过 SSH 对背书节点注入故障
 - `extract_metrics.py`：汇总交易结果和日志指标
 - `matrix_*.json`：四类实验矩阵
@@ -59,6 +60,57 @@
 3. 用 `prepare_accounts_pool.sh` 为某个矩阵批量准备账户。
 4. 用 `run_case.sh` 跑单个 case，或者用 `run_matrix.sh` 跑整张矩阵。
 5. 需要故障注入时，用 `fault_injector.sh` 手动对某台背书节点加延迟或停机。
+
+## 推荐使用方式
+
+如果你想把“拉取仓库”和“准备账户”留在命令行里，把“正式执行实验”收进脚本，推荐按下面的顺序来：
+
+### 1. 拉取实验仓库
+
+```bash
+cd /data/4node-experiments
+git pull --ff-only
+```
+
+如果你第一次拉取：
+
+```bash
+git clone git@github.com:SuzumiyaHaruki/4node-experiments.git /data/4node-experiments
+cd /data/4node-experiments
+```
+
+### 2. 准备账户
+
+先为所有矩阵生成账户池：
+
+```bash
+cd /data/4node-experiments
+FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_correctness.json ./accounts_pool
+FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_performance.json ./accounts_pool
+FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_threshold.json ./accounts_pool
+FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_fault.json ./accounts_pool
+```
+
+### 3. 执行实验
+
+直接运行总脚本：
+
+```bash
+cd /data/4node-experiments
+./run_all_experiments.sh
+```
+
+如果你的 `node1_redeploy.sh` 不在默认路径 `/data/node1_redeploy.sh`，可以这样指定：
+
+```bash
+NODE1_BOOTSTRAP_SCRIPT=/home/nitro/Desktop/endorsement/scripts/node1_redeploy.sh ./run_all_experiments.sh
+```
+
+如果你的 `node-2/3/4` SSH 地址和默认值不同，也可以在执行前覆盖：
+
+```bash
+NODE2_SSH=root@192.168.1.13 NODE3_SSH=root@192.168.1.6 NODE4_SSH=root@192.168.1.4 ./run_all_experiments.sh
+```
 
 ## 前置条件
 
@@ -101,6 +153,12 @@ cd /home/nitro/Desktop/experiments
 
 ```bash
 ./run_matrix.sh ./matrix_correctness.json ./exp_correctness
+```
+
+### 4. 一键执行全部实验
+
+```bash
+./run_all_experiments.sh
 ```
 
 ## 运行时覆盖
