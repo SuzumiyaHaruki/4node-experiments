@@ -91,6 +91,11 @@ FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_threshold.json ./accounts
 FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_fault.json ./accounts_pool
 ```
 
+说明：
+
+- `prepare_accounts_pool.sh` 会在开始时自动清空 nonce 缓存，避免前一轮实验重启 `node-1` 后留下旧 nonce。
+- 如果你确实想保留缓存，可以设置 `KEEP_NONCE_CACHE=1`。
+
 ### 3. 执行实验
 
 直接运行总脚本：
