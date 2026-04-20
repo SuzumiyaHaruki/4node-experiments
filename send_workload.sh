@@ -12,6 +12,7 @@ TO_KEEP=""
 TO_FAIL=""
 SEND_MODE="sequential"
 CONCURRENCY="20"
+SEND_WORKDIR=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -150,6 +151,20 @@ get_nonce_for_key() {
   echo "$nonce"
 }
 
+pick_tx_type_for_position() {
+  local pos="$1"
+  local total="$2"
+  local fail_total="$3"
+  local prev_cutoff current_cutoff
+  prev_cutoff=$(( (pos - 1) * fail_total / total ))
+  current_cutoff=$(( pos * fail_total / total ))
+  if [[ "$current_cutoff" -gt "$prev_cutoff" ]]; then
+    echo "fail"
+  else
+    echo "keep"
+  fi
+}
+
 run_legacy_mode() {
   local fail_count
   fail_count=$(python3 - <<PY
@@ -242,20 +257,20 @@ PY
   keep_nonce=$(get_nonce_for_key "$KEY_KEEP")
   fail_nonce=$(get_nonce_for_key "$KEY_FAIL")
 
-  local workdir send_dir receipt_dir
-  workdir=$(mktemp -d /tmp/nitro_send_workload.XXXXXX)
-  send_dir="$workdir/send"
-  receipt_dir="$workdir/receipt"
+  SEND_WORKDIR=$(mktemp -d /tmp/nitro_send_workload.XXXXXX)
+  local send_dir receipt_dir
+  send_dir="$SEND_WORKDIR/send"
+  receipt_dir="$SEND_WORKDIR/receipt"
   mkdir -p "$send_dir" "$receipt_dir"
-  trap 'rm -rf "$workdir"' EXIT
+  trap 'rm -rf "$SEND_WORKDIR"' EXIT
 
   local keep_next_nonce fail_next_nonce
   keep_next_nonce=$((keep_nonce))
   fail_next_nonce=$((fail_nonce))
 
   for i in $(seq 1 "$TX_TOTAL"); do
-    if [[ "$i" -le "$fail_count" ]]; then
-      tx_type="fail"
+    tx_type="$(pick_tx_type_for_position "$i" "$TX_TOTAL" "$fail_count")"
+    if [[ "$tx_type" == "fail" ]]; then
       key="$KEY_FAIL"
       to="$TO_FAIL"
       nonce="$fail_next_nonce"
