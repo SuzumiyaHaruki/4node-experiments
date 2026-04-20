@@ -7,10 +7,12 @@ RESULTS_DIR="${RESULTS_DIR:-$ROOT_DIR/results}"
 ACCOUNTS_DIR="${ACCOUNTS_DIR:-$ROOT_DIR/accounts_pool}"
 NODE1_BOOTSTRAP_SCRIPT="${NODE1_BOOTSTRAP_SCRIPT:-/data/node1_redeploy.sh}"
 NODE1_RPC_URL="${NODE1_RPC_URL:-http://127.0.0.1:8547}"
+FUND_AMOUNT="${FUND_AMOUNT:-3ether}"
+NONCE_CACHE_FILE="${NONCE_CACHE_FILE:-/tmp/nitro_prepare_accounts_funder_nonce}"
 NODE2_SSH="${NODE2_SSH:-root@192.168.1.13}"
 NODE3_SSH="${NODE3_SSH:-root@192.168.1.6}"
 NODE4_SSH="${NODE4_SSH:-root@192.168.1.4}"
-export ACCOUNTS_DIR NODE1_RPC_URL NODE2_SSH NODE3_SSH NODE4_SSH
+export ACCOUNTS_DIR NODE1_RPC_URL FUND_AMOUNT NONCE_CACHE_FILE NODE2_SSH NODE3_SSH NODE4_SSH
 
 THRESHOLD_2OF3_CMD="${THRESHOLD_2OF3_CMD:-DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 bash ${NODE1_BOOTSTRAP_SCRIPT}}"
 THRESHOLD_3OF3_CMD="${THRESHOLD_3OF3_CMD:-DEFAULT_THRESHOLD=3 STRICT_THRESHOLD=3 bash ${NODE1_BOOTSTRAP_SCRIPT}}"
@@ -24,17 +26,6 @@ run_matrix_case() {
   "$ROOT_DIR/run_matrix.sh" "$matrix_json" "$out_dir"
 }
 
-run_threshold_case() {
-  local matrix_json="$1"
-  local case_name="$2"
-  local case_env="$3"
-  local out_dir="$4"
-  local bootstrap_cmd="$5"
-
-  NODE1_BOOTSTRAP_CMD="$bootstrap_cmd" \
-    "$ROOT_DIR/run_case.sh" "$matrix_json" "$case_name" "$case_env" "$out_dir"
-}
-
 echo "[*] running correctness matrix"
 run_matrix_case "$ROOT_DIR/matrix_correctness.json" "$RESULTS_DIR/correctness"
 
@@ -45,20 +36,21 @@ echo "[*] running threshold cases"
 for case_name in threshold_2of3_fail20 threshold_3of3_fail20 threshold_2of3_fail40 threshold_3of3_fail40; do
   case_env="$ACCOUNTS_DIR/$case_name.env"
   if [[ "$case_name" == threshold_2of3* ]]; then
-    run_threshold_case \
-      "$ROOT_DIR/matrix_threshold.json" \
-      "$case_name" \
-      "$case_env" \
-      "$RESULTS_DIR/threshold" \
-      "$THRESHOLD_2OF3_CMD"
+    bootstrap_cmd="$THRESHOLD_2OF3_CMD"
   else
-    run_threshold_case \
-      "$ROOT_DIR/matrix_threshold.json" \
-      "$case_name" \
-      "$case_env" \
-      "$RESULTS_DIR/threshold" \
-      "$THRESHOLD_3OF3_CMD"
+    bootstrap_cmd="$THRESHOLD_3OF3_CMD"
   fi
+
+  echo "[*] bootstrapping node-1 for threshold case=$case_name"
+  bash -lc "$bootstrap_cmd"
+
+  echo "[*] preparing fresh accounts for threshold case=$case_name"
+  rm -f "$NONCE_CACHE_FILE"
+  "$ROOT_DIR/prepare_accounts.sh" "$case_env"
+
+  echo "[*] running threshold case=$case_name"
+  NODE1_BOOTSTRAP_CMD= \
+    "$ROOT_DIR/run_case.sh" "$ROOT_DIR/matrix_threshold.json" "$case_name" "$case_env" "$RESULTS_DIR/threshold"
 done
 
 echo "[*] running fault matrix"

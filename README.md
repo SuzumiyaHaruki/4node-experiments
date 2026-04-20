@@ -117,6 +117,11 @@ NODE1_BOOTSTRAP_SCRIPT=/home/nitro/Desktop/endorsement/scripts/node1_redeploy.sh
 NODE2_SSH=root@192.168.1.13 NODE3_SSH=root@192.168.1.6 NODE4_SSH=root@192.168.1.4 ./run_all_experiments.sh
 ```
 
+注意：
+
+- `threshold` 会在每个 case 前重新 bootstrap `node-1`，然后重新准备该 case 的账户文件，再发送 workload。
+- `fault` 会在进入 fault 矩阵前重新准备账户池，避免上一个实验阶段留下的 nonce 缓存影响后续发送。
+
 ## 前置条件
 
 ### 所有实验机
@@ -158,12 +163,6 @@ cd /home/nitro/Desktop/experiments
 
 ```bash
 ./run_matrix.sh ./matrix_correctness.json ./exp_correctness
-```
-
-### 4. 一键执行全部实验
-
-```bash
-./run_all_experiments.sh
 ```
 
 ## 运行时覆盖
