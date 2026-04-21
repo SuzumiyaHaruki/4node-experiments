@@ -159,6 +159,11 @@ if [[ -n "$NODE1_BOOTSTRAP_CMD" ]]; then
   bash -lc "${bootstrap_prefix}${NODE1_BOOTSTRAP_CMD}"
 fi
 
+if [[ -f "$NONCE_CACHE_FILE" ]]; then
+  echo "[*] clearing cached funder nonce after bootstrap: $NONCE_CACHE_FILE"
+  rm -f "$NONCE_CACHE_FILE"
+fi
+
 keep_pool_env=""
 fail_pool_env=""
 if [[ "$use_account_pool" == "true" ]]; then
