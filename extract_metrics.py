@@ -23,6 +23,21 @@ def load_csv(path):
     with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
+def safe_float(value):
+    try:
+        return float(str(value).strip())
+    except Exception:
+        return None
+
+def safe_int(value):
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return int(s, 0)
+    except Exception:
+        return None
+
 def parse_fault_status(path):
     result = {"fault_status": None, "fault_message": None, "fault_name": None}
     if not path:
@@ -96,6 +111,9 @@ def main():
     latencies = []
     keep_rows = []
     fail_rows = []
+    send_timestamps = []
+    completion_timestamps = []
+    success_block_numbers = []
     tx_error_count = 0
     tx_receipt_count = 0
     tx_timeout_count = 0
@@ -108,6 +126,9 @@ def main():
         keep_rows.append(r)
       elif tx_type == "fail":
         fail_rows.append(r)
+      send_ts_ns = safe_int(r.get("send_ts_ns", ""))
+      if send_ts_ns is not None:
+        send_timestamps.append(send_ts_ns)
       err = str(r.get("error", "")).strip()
       err_stage = str(r.get("error_stage", "")).strip().lower()
       if err:
@@ -121,15 +142,44 @@ def main():
       status = str(r.get("receipt_status", "")).strip()
       if status:
         tx_receipt_count += 1
-      try:
-        latencies.append(float(r["latency_ms"]))
-      except Exception:
-        pass
+      latency_ms = safe_float(r.get("latency_ms", ""))
+      if latency_ms is not None:
+        latencies.append(latency_ms)
+      if send_ts_ns is not None:
+        if latency_ms is not None:
+          completion_timestamps.append(send_ts_ns + int(latency_ms * 1_000_000))
+        else:
+          completion_timestamps.append(send_ts_ns)
+      if classify_receipt_success(status):
+        block_number = safe_int(r.get("block_number", ""))
+        if block_number is not None:
+          success_block_numbers.append(block_number)
 
     keep_success = sum(1 for r in keep_rows if classify_receipt_success(r.get("receipt_status", "")))
     fail_success = sum(1 for r in fail_rows if classify_receipt_success(r.get("receipt_status", "")))
     log_stats = parse_logs([args.sequencer_log] + args.endorser_log)
     fault_info = parse_fault_status(args.fault_status)
+    workload_makespan_ms = None
+    if send_timestamps and completion_timestamps:
+        workload_makespan_ms = round((max(completion_timestamps) - min(send_timestamps)) / 1e6, 3)
+    unique_success_blocks = len(set(success_block_numbers)) if success_block_numbers else 0
+    success_per_block_avg = None
+    if unique_success_blocks > 0:
+        success_per_block_avg = round(tx_receipt_count / unique_success_blocks, 3)
+    success_rate = round(tx_receipt_count / len(rows), 4) if rows else None
+    success_tps = None
+    attempt_tps = None
+    if workload_makespan_ms and workload_makespan_ms > 0:
+        duration_s = workload_makespan_ms / 1000.0
+        success_tps = round(tx_receipt_count / duration_s, 3)
+        attempt_tps = round(len(rows) / duration_s, 3)
+    rebuilds_per_success_tx = None
+    endorsement_failed_per_success_tx = None
+    remote_requests_per_success_tx = None
+    if tx_receipt_count > 0:
+        rebuilds_per_success_tx = round(log_stats["rebuild_count"] / tx_receipt_count, 4)
+        endorsement_failed_per_success_tx = round(log_stats["endorsement_failed"] / tx_receipt_count, 4)
+        remote_requests_per_success_tx = round(log_stats["remote_request_count"] / tx_receipt_count, 3)
 
     summary = {
         "case_name": args.case_name,
@@ -143,12 +193,21 @@ def main():
         "lat_p50_ms": round(percentile(latencies, 0.50), 3) if latencies else None,
         "lat_p95_ms": round(percentile(latencies, 0.95), 3) if latencies else None,
         "lat_p99_ms": round(percentile(latencies, 0.99), 3) if latencies else None,
+        "workload_makespan_ms": workload_makespan_ms,
+        "success_rate": success_rate,
+        "success_tps": success_tps,
+        "attempt_tps": attempt_tps,
+        "unique_success_blocks": unique_success_blocks,
+        "success_per_block_avg": success_per_block_avg,
         "keep_total": len(keep_rows),
         "keep_success": keep_success,
         "keep_retention_rate": round(keep_success / len(keep_rows), 4) if keep_rows else None,
         "fail_total": len(fail_rows),
         "fail_success": fail_success,
         "fail_drop_rate": round((len(fail_rows) - fail_success) / len(fail_rows), 4) if fail_rows else None,
+        "rebuilds_per_success_tx": rebuilds_per_success_tx,
+        "endorsement_failed_per_success_tx": endorsement_failed_per_success_tx,
+        "remote_requests_per_success_tx": remote_requests_per_success_tx,
         **log_stats,
         **fault_info,
     }

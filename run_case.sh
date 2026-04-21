@@ -10,6 +10,7 @@ NODE1_RPC_URL="${NODE1_RPC_URL:-http://127.0.0.1:8547}"
 NODE1_BOOTSTRAP_CMD="${NODE1_BOOTSTRAP_CMD:-}"
 FAULT_STATUS_DIR="${FAULT_STATUS_DIR:-./.fault_status}"
 NONCE_CACHE_FILE="${NONCE_CACHE_FILE:-/tmp/nitro_prepare_accounts_funder_nonce}"
+SEQUENCER_LOG_PATH="${SEQUENCER_LOG_PATH:-/data/nitro-logs/nitro.log}"
 
 if [[ -z "$MATRIX_JSON" || -z "$CASE_NAME" || -z "$CASE_ENV" ]]; then
   echo "usage: $0 <matrix.json> <case_name> <case.env> [out_dir]" >&2
@@ -98,6 +99,12 @@ if [[ "$fault" != "none" ]]; then
   ./fault_injector.sh apply "$fault" "$FAULT_STATUS_DIR"
 fi
 
+case_sequencer_log="$case_dir/sequencer.log"
+sequencer_log_start=0
+if [[ -f "$SEQUENCER_LOG_PATH" ]]; then
+  sequencer_log_start=$(wc -l < "$SEQUENCER_LOG_PATH")
+fi
+
 send_args=(
   --rpc "$NODE1_RPC_URL"
   --tx-total "$tx_total"
@@ -128,13 +135,16 @@ if [[ "$fault" != "none" ]]; then
   ./fault_injector.sh clear "$fault" "$FAULT_STATUS_DIR" || true
 fi
 
+if [[ -f "$SEQUENCER_LOG_PATH" ]]; then
+  tail -n +"$((sequencer_log_start + 1))" "$SEQUENCER_LOG_PATH" > "$case_sequencer_log"
+else
+  : > "$case_sequencer_log"
+fi
+
 python3 ./extract_metrics.py \
   --case-name "$CASE_NAME" \
   --tx-csv "$case_dir/tx_results.csv" \
-  --sequencer-log /data/nitro-logs/nitro.log \
-  --endorser-log /data/nitro-logs/endorser.log \
-  --endorser-log /data/nitro-logs/endorser.log \
-  --endorser-log /data/nitro-logs/endorser.log \
+  --sequencer-log "$case_sequencer_log" \
   --fault-status "${FAULT_STATUS_DIR}/$(echo "$fault" | sed 's#[/:, ]#_#g').status" \
   --out-json "$case_dir/summary.json" \
   --out-tsv "$case_dir/summary.tsv"
