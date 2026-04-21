@@ -81,14 +81,14 @@ print(int(total * ratio))
 PY
 )"
   keep_count=$((tx_total - fail_count))
-  keep_pool_env="${CASE_ENV%.env}_keep_pool.env"
-  fail_pool_env="${CASE_ENV%.env}_fail_pool.env"
 
   if (( keep_count > 0 )); then
+    keep_pool_env="${CASE_ENV%.env}_keep_pool.env"
     echo "[*] preparing keep pool for case=$CASE_NAME size=$keep_count"
     FUND_AMOUNT="$pool_fund_amount" NONCE_CACHE_FILE="$NONCE_CACHE_FILE" ./prepare_keep_pool.sh "$keep_pool_env" "$keep_count"
   fi
   if (( fail_count > 0 )); then
+    fail_pool_env="${CASE_ENV%.env}_fail_pool.env"
     echo "[*] preparing fail pool for case=$CASE_NAME size=$fail_count"
     FUND_AMOUNT="$pool_fund_amount" NONCE_CACHE_FILE="$NONCE_CACHE_FILE" ./prepare_fail_pool.sh "$fail_pool_env" "$fail_count"
   fi
