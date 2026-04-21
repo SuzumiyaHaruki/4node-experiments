@@ -29,7 +29,7 @@
     "tx_total": 120,
     "tps": 20,
     "send_mode": "concurrent",
-    "concurrency": 20,
+    "concurrency": 4,
     "fail_ratio": 0.0,
     "fault": "none"
   },
