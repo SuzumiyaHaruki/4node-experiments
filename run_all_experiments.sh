@@ -12,7 +12,9 @@ NONCE_CACHE_FILE="${NONCE_CACHE_FILE:-/tmp/nitro_prepare_accounts_funder_nonce}"
 PERF_BATCHING_WINDOW_MS="${PERF_BATCHING_WINDOW_MS:-1200}"
 PERF_BOOTSTRAP_CMD="${PERF_BOOTSTRAP_CMD:-RESET_CHAIN=1 BATCHING_WINDOW_MS=${PERF_BATCHING_WINDOW_MS} ENDORSEMENT_MODE=remote DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 DEFAULT_AGGREGATION=bls STRICT_AGGREGATION=bls BLOCK_ENDORSEMENT_TIMEOUT_MS=2000 MAX_REBUILD_ROUNDS=3 bash ${NODE1_BOOTSTRAP_SCRIPT}}"
 FAULT_TX_TOTAL="${FAULT_TX_TOTAL:-60}"
-FAULT_TPS="${FAULT_TPS:-2}"
+FAULT_TPS="${FAULT_TPS:-4}"
+FAULT_SEND_MODE="${FAULT_SEND_MODE:-concurrent}"
+FAULT_CONCURRENCY="${FAULT_CONCURRENCY:-4}"
 FAULT_FAIL_RATIO="${FAULT_FAIL_RATIO:-0.1}"
 FAULT_BATCHING_WINDOW_MS="${FAULT_BATCHING_WINDOW_MS:-2000}"
 FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS="${FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS:-5000}"
@@ -81,6 +83,8 @@ trap 'rm -f "$FAULT_MATRIX_FILE"' EXIT
 jq \
   --argjson tx_total "$FAULT_TX_TOTAL" \
   --argjson tps "$FAULT_TPS" \
+  --arg send_mode "$FAULT_SEND_MODE" \
+  --argjson concurrency "$FAULT_CONCURRENCY" \
   --argjson fail_ratio "$FAULT_FAIL_RATIO" \
   --argjson batching_window_ms "$FAULT_BATCHING_WINDOW_MS" \
   --argjson block_endorsement_timeout_ms "$FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS" \
@@ -90,6 +94,8 @@ jq \
       if (.name | startswith("fault_")) then
         .tx_total = $tx_total
         | .tps = $tps
+        | .send_mode = $send_mode
+        | .concurrency = $concurrency
         | .fail_ratio = $fail_ratio
         | .batching_window_ms = $batching_window_ms
         | .block_endorsement_timeout_ms = $block_endorsement_timeout_ms
@@ -101,7 +107,7 @@ jq \
   ' \
   "$ROOT_DIR/matrix_fault.json" > "$FAULT_MATRIX_FILE"
 
-echo "[*] fault defaults: tx_total=$FAULT_TX_TOTAL tps=$FAULT_TPS fail_ratio=$FAULT_FAIL_RATIO batching_window_ms=$FAULT_BATCHING_WINDOW_MS timeout_ms=$FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS max_rebuild_rounds=$FAULT_MAX_REBUILD_ROUNDS"
+echo "[*] fault defaults: tx_total=$FAULT_TX_TOTAL tps=$FAULT_TPS send_mode=$FAULT_SEND_MODE concurrency=$FAULT_CONCURRENCY fail_ratio=$FAULT_FAIL_RATIO batching_window_ms=$FAULT_BATCHING_WINDOW_MS timeout_ms=$FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS max_rebuild_rounds=$FAULT_MAX_REBUILD_ROUNDS"
 reset_endorsers_to_default
 echo "[*] stopping existing node-1 before fault matrix"
 bash -lc "$NODE1_STOP_CMD"

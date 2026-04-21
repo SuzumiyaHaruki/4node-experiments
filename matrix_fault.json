@@ -11,7 +11,9 @@
     "max_rebuild_rounds": 5,
     "use_account_pool": true,
     "tx_total": 60,
-    "tps": 2,
+    "tps": 4,
+    "send_mode": "concurrent",
+    "concurrency": 4,
     "fail_ratio": 0.1,
     "fault": "none"
   },
@@ -27,7 +29,9 @@
     "max_rebuild_rounds": 5,
     "use_account_pool": true,
     "tx_total": 60,
-    "tps": 2,
+    "tps": 4,
+    "send_mode": "concurrent",
+    "concurrency": 4,
     "fail_ratio": 0.1,
     "fault": "delay:node-2:100ms"
   },
@@ -43,7 +47,9 @@
     "max_rebuild_rounds": 5,
     "use_account_pool": true,
     "tx_total": 60,
-    "tps": 2,
+    "tps": 4,
+    "send_mode": "concurrent",
+    "concurrency": 4,
     "fail_ratio": 0.1,
     "fault": "delay:node-2:300ms"
   },
@@ -59,7 +65,9 @@
     "max_rebuild_rounds": 5,
     "use_account_pool": true,
     "tx_total": 60,
-    "tps": 2,
+    "tps": 4,
+    "send_mode": "concurrent",
+    "concurrency": 4,
     "fail_ratio": 0.1,
     "fault": "delay:node-2:500ms"
   },
@@ -75,7 +83,9 @@
     "max_rebuild_rounds": 5,
     "use_account_pool": true,
     "tx_total": 60,
-    "tps": 2,
+    "tps": 4,
+    "send_mode": "concurrent",
+    "concurrency": 4,
     "fail_ratio": 0.1,
     "fault": "delay:node-2:5000ms"
   },
@@ -91,7 +101,9 @@
     "max_rebuild_rounds": 5,
     "use_account_pool": true,
     "tx_total": 60,
-    "tps": 2,
+    "tps": 4,
+    "send_mode": "concurrent",
+    "concurrency": 4,
     "fail_ratio": 0.1,
     "fault": "down:node-2"
   },
@@ -107,7 +119,9 @@
     "max_rebuild_rounds": 5,
     "use_account_pool": true,
     "tx_total": 60,
-    "tps": 2,
+    "tps": 4,
+    "send_mode": "concurrent",
+    "concurrency": 4,
     "fail_ratio": 0.1,
     "fault": "down:node-2,node-3"
   }

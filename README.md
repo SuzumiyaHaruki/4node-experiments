@@ -267,9 +267,10 @@ cd /home/nitro/Desktop/experiments
 
 ### 3. Threshold
 
-目标是比较不同背书阈值下的行为边界，例如 `2-of-3` 和 `3-of-3` 在正常场景、以及“只有一个背书节点拒签”场景下的差异。
+目标是比较不同背书阈值下的行为边界，例如 `2-of-3` 和 `3-of-3` 在正常场景、以及“只有一个背书节点对普通 keep 交易定向拒签”场景下的差异。
 
 这类实验已经内置到矩阵里，`run_all_experiments.sh` 会在每个 threshold case 之前自动重新拉起 `node-1`，并按 case 重配 A/B/C 背书节点的拒签地址。
+其中 `threshold_partial_reject_*` 不再把交易发送到 fail 地址，而是继续发送到普通 keep 地址 `0x2222...2222`，仅让 endorser A 对这个 keep 地址定向拒签。这样测到的是“普通交易在部分拒签下的门限差异”，而不是 fail/strict policy 的语义。
 
 矩阵里常见 case 有：
 
@@ -284,7 +285,8 @@ cd /home/nitro/Desktop/experiments
 
 目标是验证在固定 `2-of-3` 远程背书配置下，系统从正常状态到延迟退化、再到节点失效的退化路径。
 
-当前默认的 fault 矩阵使用：`tx_total=60`、`tps=2`、`fail_ratio=0.1`，`batching_window_ms=2000`，`block_endorsement_timeout_ms=5000`，`max_rebuild_rounds=5`。
+当前默认的 fault 矩阵使用：`tx_total=60`、`tps=4`、`send_mode=concurrent`、`concurrency=4`、`fail_ratio=0.1`，`batching_window_ms=2000`，`block_endorsement_timeout_ms=5000`，`max_rebuild_rounds=5`。
+这样 fault 组也会尽量形成稳定的块内聚合，而不是退化成近似一块一笔的发送节奏。
 
 在跑 fault 矩阵之前，`run_all_experiments.sh` 会先安全停掉旧的 `node-1`，再用一条干净的链重新 bootstrap 到 `DEFAULT_THRESHOLD=2`、`STRICT_THRESHOLD=3` 的运行态。这样不会继承 threshold 阶段留下的更激进配置，也不会撞上 `datadir already used by another process`。
 

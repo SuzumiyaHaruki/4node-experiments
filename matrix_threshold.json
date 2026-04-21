@@ -51,8 +51,7 @@
     "send_mode": "concurrent",
     "concurrency": 4,
     "fail_ratio": 0.0,
-    "to_keep_override": "0x1111111111111111111111111111111111111111",
-    "endorser_a_reject_to": "0x1111111111111111111111111111111111111111",
+    "endorser_a_reject_to": "0x2222222222222222222222222222222222222222",
     "endorser_b_reject_to": "",
     "endorser_c_reject_to": "",
     "fault": "none"
@@ -73,8 +72,7 @@
     "send_mode": "concurrent",
     "concurrency": 4,
     "fail_ratio": 0.0,
-    "to_keep_override": "0x1111111111111111111111111111111111111111",
-    "endorser_a_reject_to": "0x1111111111111111111111111111111111111111",
+    "endorser_a_reject_to": "0x2222222222222222222222222222222222222222",
     "endorser_b_reject_to": "",
     "endorser_c_reject_to": "",
     "fault": "none"
