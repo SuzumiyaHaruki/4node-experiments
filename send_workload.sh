@@ -8,10 +8,14 @@ FAIL_RATIO=""
 OUT_CSV=""
 KEY_KEEP=""
 KEY_FAIL=""
+ADDR_KEEP=""
+ADDR_FAIL=""
 TO_KEEP=""
 TO_FAIL=""
 SEND_MODE="sequential"
 CONCURRENCY="20"
+KEEP_POOL_ENV=""
+FAIL_POOL_ENV=""
 SEND_WORKDIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -23,10 +27,14 @@ while [[ $# -gt 0 ]]; do
     --out) OUT_CSV="$2"; shift 2 ;;
     --key-keep) KEY_KEEP="$2"; shift 2 ;;
     --key-fail) KEY_FAIL="$2"; shift 2 ;;
+    --addr-keep) ADDR_KEEP="$2"; shift 2 ;;
+    --addr-fail) ADDR_FAIL="$2"; shift 2 ;;
     --to-keep) TO_KEEP="$2"; shift 2 ;;
     --to-fail) TO_FAIL="$2"; shift 2 ;;
     --send-mode) SEND_MODE="$2"; shift 2 ;;
     --concurrency) CONCURRENCY="$2"; shift 2 ;;
+    --keep-pool-env) KEEP_POOL_ENV="$2"; shift 2 ;;
+    --fail-pool-env) FAIL_POOL_ENV="$2"; shift 2 ;;
     *) echo "unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -142,13 +150,16 @@ throttle_jobs() {
   done
 }
 
+fetch_account_nonce() {
+  local addr="$1"
+  cast nonce "$addr" --rpc-url "$RPC_URL" 2>/dev/null | tr -d '[:space:]'
+}
+
 get_nonce_for_key() {
   local key="$1"
   local addr
   addr=$(cast wallet address --private-key "$key")
-  local nonce
-  nonce=$(cast nonce "$addr" --rpc-url "$RPC_URL")
-  echo "$nonce"
+  fetch_account_nonce "$addr"
 }
 
 pick_tx_type_for_position() {
@@ -165,6 +176,122 @@ pick_tx_type_for_position() {
   fi
 }
 
+declare -a KEEP_POOL_KEYS KEEP_POOL_ADDRS KEEP_POOL_NONCES
+declare -a FAIL_POOL_KEYS FAIL_POOL_ADDRS FAIL_POOL_NONCES
+KEEP_BASE_NONCE=""
+FAIL_BASE_NONCE=""
+
+load_keep_pool() {
+  local pool_env="$1"
+  [[ -f "$pool_env" ]] || { echo "keep pool env not found: $pool_env" >&2; exit 1; }
+  # shellcheck disable=SC1090
+  source "$pool_env"
+
+  local pool_size="${KEEP_POOL_SIZE:-0}"
+  if ! [[ "$pool_size" =~ ^[0-9]+$ ]] || (( pool_size < 1 )); then
+    echo "invalid KEEP_POOL_SIZE in $pool_env: $pool_size" >&2
+    exit 1
+  fi
+
+  KEEP_POOL_KEYS=()
+  KEEP_POOL_ADDRS=()
+  KEEP_POOL_NONCES=()
+
+  local idx key_var addr_var key addr nonce
+  for idx in $(seq 1 "$pool_size"); do
+    key_var="KEEP_KEY_${idx}"
+    addr_var="KEEP_ADDR_${idx}"
+    key="${!key_var:-}"
+    addr="${!addr_var:-}"
+    [[ -n "$key" && -n "$addr" ]] || { echo "missing $key_var or $addr_var in $pool_env" >&2; exit 1; }
+    nonce=$(fetch_account_nonce "$addr")
+    [[ "$nonce" =~ ^[0-9]+$ ]] || { echo "failed to fetch nonce for keep pool address: $addr" >&2; exit 1; }
+    KEEP_POOL_KEYS+=("$key")
+    KEEP_POOL_ADDRS+=("$addr")
+    KEEP_POOL_NONCES+=("$nonce")
+  done
+}
+
+load_fail_pool() {
+  local pool_env="$1"
+  [[ -f "$pool_env" ]] || { echo "fail pool env not found: $pool_env" >&2; exit 1; }
+  # shellcheck disable=SC1090
+  source "$pool_env"
+
+  local pool_size="${FAIL_POOL_SIZE:-0}"
+  if ! [[ "$pool_size" =~ ^[0-9]+$ ]] || (( pool_size < 1 )); then
+    echo "invalid FAIL_POOL_SIZE in $pool_env: $pool_size" >&2
+    exit 1
+  fi
+
+  FAIL_POOL_KEYS=()
+  FAIL_POOL_ADDRS=()
+  FAIL_POOL_NONCES=()
+
+  local idx key_var addr_var key addr nonce
+  for idx in $(seq 1 "$pool_size"); do
+    key_var="FAIL_KEY_${idx}"
+    addr_var="FAIL_ADDR_${idx}"
+    key="${!key_var:-}"
+    addr="${!addr_var:-}"
+    [[ -n "$key" && -n "$addr" ]] || { echo "missing $key_var or $addr_var in $pool_env" >&2; exit 1; }
+    nonce=$(fetch_account_nonce "$addr")
+    [[ "$nonce" =~ ^[0-9]+$ ]] || { echo "failed to fetch nonce for fail pool address: $addr" >&2; exit 1; }
+    FAIL_POOL_KEYS+=("$key")
+    FAIL_POOL_ADDRS+=("$addr")
+    FAIL_POOL_NONCES+=("$nonce")
+  done
+}
+
+init_sender_state() {
+  if [[ -n "$KEEP_POOL_ENV" ]]; then
+    load_keep_pool "$KEEP_POOL_ENV"
+  elif [[ -n "$KEY_KEEP" ]]; then
+    KEEP_BASE_NONCE=$(get_nonce_for_key "$KEY_KEEP")
+  fi
+
+  if [[ -n "$FAIL_POOL_ENV" ]]; then
+    load_fail_pool "$FAIL_POOL_ENV"
+  elif [[ -n "$KEY_FAIL" ]]; then
+    FAIL_BASE_NONCE=$(get_nonce_for_key "$KEY_FAIL")
+  fi
+}
+
+resolve_sender() {
+  local tx_type="$1"
+  local type_index="$2"
+  local zero_index=$((type_index - 1))
+  local key addr to nonce
+
+  if [[ "$tx_type" == "fail" ]]; then
+    to="$TO_FAIL"
+    if [[ -n "$FAIL_POOL_ENV" ]]; then
+      (( zero_index < ${#FAIL_POOL_KEYS[@]} )) || { echo "not enough fail pool accounts: have ${#FAIL_POOL_KEYS[@]}, need $type_index" >&2; exit 1; }
+      key="${FAIL_POOL_KEYS[$zero_index]}"
+      addr="${FAIL_POOL_ADDRS[$zero_index]}"
+      nonce="${FAIL_POOL_NONCES[$zero_index]}"
+    else
+      key="$KEY_FAIL"
+      addr="$ADDR_FAIL"
+      nonce=$((FAIL_BASE_NONCE + zero_index))
+    fi
+  else
+    to="$TO_KEEP"
+    if [[ -n "$KEEP_POOL_ENV" ]]; then
+      (( zero_index < ${#KEEP_POOL_KEYS[@]} )) || { echo "not enough keep pool accounts: have ${#KEEP_POOL_KEYS[@]}, need $type_index" >&2; exit 1; }
+      key="${KEEP_POOL_KEYS[$zero_index]}"
+      addr="${KEEP_POOL_ADDRS[$zero_index]}"
+      nonce="${KEEP_POOL_NONCES[$zero_index]}"
+    else
+      key="$KEY_KEEP"
+      addr="$ADDR_KEEP"
+      nonce=$((KEEP_BASE_NONCE + zero_index))
+    fi
+  fi
+
+  printf '%s|%s|%s|%s\n' "$key" "$addr" "$to" "$nonce"
+}
+
 run_legacy_mode() {
   local fail_count
   fail_count=$(python3 - <<PY
@@ -174,6 +301,7 @@ print(int(total * ratio))
 PY
 )
 
+  local keep_seen=0 fail_seen=0
   declare -a row_seq row_tx_type row_send_ts row_tx_hash row_receipt_status row_block_number row_latency_ms row_error row_error_stage
   pending_indices=()
 
@@ -191,18 +319,20 @@ PY
   }
 
   for i in $(seq 1 "$TX_TOTAL"); do
-    if [[ "$i" -le "$fail_count" ]]; then
-      tx_type="fail"
-      key="$KEY_FAIL"
-      to="$TO_FAIL"
+    local tx_type sender_info key addr to nonce send_ts_ns send_out tx_hash err receipt_line receipt_status block_number latency_ms err_stage
+    tx_type="$(pick_tx_type_for_position "$i" "$TX_TOTAL" "$fail_count")"
+    if [[ "$tx_type" == "fail" ]]; then
+      fail_seen=$((fail_seen + 1))
+      sender_info="$(resolve_sender "fail" "$fail_seen")"
     else
       tx_type="keep"
-      key="$KEY_KEEP"
-      to="$TO_KEEP"
+      keep_seen=$((keep_seen + 1))
+      sender_info="$(resolve_sender "keep" "$keep_seen")"
     fi
+    IFS='|' read -r key addr to nonce <<<"$sender_info"
 
     send_ts_ns=$(date +%s%N)
-    send_out=$(cast send "$to" --value 0.001ether --private-key "$key" --rpc-url "$RPC_URL" --json 2>&1 || true)
+    send_out=$(cast send "$to" --value 0.001ether --private-key "$key" --rpc-url "$RPC_URL" --nonce "$nonce" --json 2>&1 || true)
     tx_hash=$(jq -r '.transactionHash // empty' <<<"$send_out" 2>/dev/null || true)
 
     if [[ -z "$tx_hash" ]]; then
@@ -253,34 +383,26 @@ PY
     concurrency_limit="$TX_TOTAL"
   fi
 
-  local keep_nonce fail_nonce
-  keep_nonce=$(get_nonce_for_key "$KEY_KEEP")
-  fail_nonce=$(get_nonce_for_key "$KEY_FAIL")
-
   SEND_WORKDIR=$(mktemp -d /tmp/nitro_send_workload.XXXXXX)
   local send_dir
   send_dir="$SEND_WORKDIR/send"
   mkdir -p "$send_dir"
   trap 'rm -rf "$SEND_WORKDIR"' EXIT
 
-  local keep_next_nonce fail_next_nonce
-  keep_next_nonce=$((keep_nonce))
-  fail_next_nonce=$((fail_nonce))
+  local keep_seen=0 fail_seen=0
 
   for i in $(seq 1 "$TX_TOTAL"); do
+    local tx_type sender_info key addr to nonce
     tx_type="$(pick_tx_type_for_position "$i" "$TX_TOTAL" "$fail_count")"
     if [[ "$tx_type" == "fail" ]]; then
-      key="$KEY_FAIL"
-      to="$TO_FAIL"
-      nonce="$fail_next_nonce"
-      fail_next_nonce=$((fail_next_nonce + 1))
+      fail_seen=$((fail_seen + 1))
+      sender_info="$(resolve_sender "fail" "$fail_seen")"
     else
       tx_type="keep"
-      key="$KEY_KEEP"
-      to="$TO_KEEP"
-      nonce="$keep_next_nonce"
-      keep_next_nonce=$((keep_next_nonce + 1))
+      keep_seen=$((keep_seen + 1))
+      sender_info="$(resolve_sender "keep" "$keep_seen")"
     fi
+    IFS='|' read -r key addr to nonce <<<"$sender_info"
 
     submit_tx "$i" "$tx_type" "$key" "$to" "$nonce" "$send_dir/$i" &
     throttle_jobs "$concurrency_limit"
@@ -302,6 +424,8 @@ PY
     fi
   done
 }
+
+init_sender_state
 
 case "$SEND_MODE" in
   sequential|deferred)

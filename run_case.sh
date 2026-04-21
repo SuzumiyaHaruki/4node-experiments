@@ -9,6 +9,7 @@ OUT_DIR="${4:-./exp_out}"
 NODE1_RPC_URL="${NODE1_RPC_URL:-http://127.0.0.1:8547}"
 NODE1_BOOTSTRAP_CMD="${NODE1_BOOTSTRAP_CMD:-}"
 FAULT_STATUS_DIR="${FAULT_STATUS_DIR:-./.fault_status}"
+NONCE_CACHE_FILE="${NONCE_CACHE_FILE:-/tmp/nitro_prepare_accounts_funder_nonce}"
 
 if [[ -z "$MATRIX_JSON" || -z "$CASE_NAME" || -z "$CASE_ENV" ]]; then
   echo "usage: $0 <matrix.json> <case_name> <case.env> [out_dir]" >&2
@@ -40,6 +41,8 @@ fail_ratio="$(jq -r '.fail_ratio' <<<"$case_json")"
 fault="$(jq -r '.fault' <<<"$case_json")"
 send_mode="$(jq -r '.send_mode // "sequential"' <<<"$case_json")"
 concurrency="$(jq -r '.concurrency // empty' <<<"$case_json")"
+use_account_pool="$(jq -r '.use_account_pool // false' <<<"$case_json")"
+pool_fund_amount="$(jq -r '.pool_fund_amount // "0.02ether"' <<<"$case_json")"
 batching_window_ms="$(jq -r '.batching_window_ms // empty' <<<"$case_json")"
 endorsement_mode="$(jq -r '.mode // empty' <<<"$case_json")"
 default_threshold="$(jq -r '.default_threshold // empty' <<<"$case_json")"
@@ -68,6 +71,29 @@ if [[ -n "$NODE1_BOOTSTRAP_CMD" ]]; then
   bash -lc "${bootstrap_prefix}${NODE1_BOOTSTRAP_CMD}"
 fi
 
+keep_pool_env=""
+fail_pool_env=""
+if [[ "$use_account_pool" == "true" ]]; then
+  fail_count="$(python3 - <<PY
+total=int("$tx_total")
+ratio=float("$fail_ratio")
+print(int(total * ratio))
+PY
+)"
+  keep_count=$((tx_total - fail_count))
+  keep_pool_env="${CASE_ENV%.env}_keep_pool.env"
+  fail_pool_env="${CASE_ENV%.env}_fail_pool.env"
+
+  if (( keep_count > 0 )); then
+    echo "[*] preparing keep pool for case=$CASE_NAME size=$keep_count"
+    FUND_AMOUNT="$pool_fund_amount" NONCE_CACHE_FILE="$NONCE_CACHE_FILE" ./prepare_keep_pool.sh "$keep_pool_env" "$keep_count"
+  fi
+  if (( fail_count > 0 )); then
+    echo "[*] preparing fail pool for case=$CASE_NAME size=$fail_count"
+    FUND_AMOUNT="$pool_fund_amount" NONCE_CACHE_FILE="$NONCE_CACHE_FILE" ./prepare_fail_pool.sh "$fail_pool_env" "$fail_count"
+  fi
+fi
+
 if [[ "$fault" != "none" ]]; then
   ./fault_injector.sh apply "$fault" "$FAULT_STATUS_DIR"
 fi
@@ -81,11 +107,19 @@ send_args=(
   --out "$case_dir/tx_results.csv"
   --key-keep "$KEY_KEEP"
   --key-fail "$KEY_FAIL"
+  --addr-keep "$ADDR_KEEP"
+  --addr-fail "$ADDR_FAIL"
   --to-keep "$TO_KEEP"
   --to-fail "$TO_FAIL"
 )
 if [[ -n "$concurrency" ]]; then
   send_args+=(--concurrency "$concurrency")
+fi
+if [[ -n "$keep_pool_env" ]]; then
+  send_args+=(--keep-pool-env "$keep_pool_env")
+fi
+if [[ -n "$fail_pool_env" ]]; then
+  send_args+=(--fail-pool-env "$fail_pool_env")
 fi
 
 ./send_workload.sh "${send_args[@]}"
