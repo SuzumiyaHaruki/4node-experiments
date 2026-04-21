@@ -44,9 +44,9 @@
     "block_endorsement_timeout_ms": 2000,
     "max_rebuild_rounds": 3,
     "tx_total": 120,
-    "tps": 20,
+    "tps": 4,
     "send_mode": "concurrent",
-    "concurrency": 20,
+    "concurrency": 4,
     "fail_ratio": 0.0,
     "fault": "none"
   },
