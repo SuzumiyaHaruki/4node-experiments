@@ -18,24 +18,6 @@
     "fault": "none"
   },
   {
-    "name": "perf_local_keep_only",
-    "mode": "local",
-    "default_threshold": 2,
-    "strict_threshold": 3,
-    "default_aggregation": "individual",
-    "strict_aggregation": "individual",
-    "batching_window_ms": 1200,
-    "block_endorsement_timeout_ms": 2000,
-    "max_rebuild_rounds": 3,
-    "use_account_pool": true,
-    "tx_total": 120,
-    "tps": 4,
-    "send_mode": "concurrent",
-    "concurrency": 4,
-    "fail_ratio": 0.0,
-    "fault": "none"
-  },
-  {
     "name": "perf_remote_keep_only",
     "mode": "remote",
     "default_threshold": 2,

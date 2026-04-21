@@ -11,6 +11,14 @@ NODE1_BOOTSTRAP_CMD="${NODE1_BOOTSTRAP_CMD:-}"
 FAULT_STATUS_DIR="${FAULT_STATUS_DIR:-./.fault_status}"
 NONCE_CACHE_FILE="${NONCE_CACHE_FILE:-/tmp/nitro_prepare_accounts_funder_nonce}"
 SEQUENCER_LOG_PATH="${SEQUENCER_LOG_PATH:-/data/nitro-logs/nitro.log}"
+NODE2_SSH="${NODE2_SSH:-root@192.168.1.13}"
+NODE3_SSH="${NODE3_SSH:-root@192.168.1.6}"
+NODE4_SSH="${NODE4_SSH:-root@192.168.1.4}"
+SSH_PASSWORD="${SSH_PASSWORD:-}"
+NODE2_START_CMD="${NODE2_START_CMD:-bash /data/node2_start.sh}"
+NODE3_START_CMD="${NODE3_START_CMD:-bash /data/node3_start.sh}"
+NODE4_START_CMD="${NODE4_START_CMD:-bash /data/node4_start.sh}"
+DEFAULT_ENDORSER_REJECT_TO="${DEFAULT_ENDORSER_REJECT_TO:-0x1111111111111111111111111111111111111111}"
 
 if [[ -z "$MATRIX_JSON" || -z "$CASE_NAME" || -z "$CASE_ENV" ]]; then
   echo "usage: $0 <matrix.json> <case_name> <case.env> [out_dir]" >&2
@@ -52,6 +60,83 @@ default_aggregation="$(jq -r '.default_aggregation // empty' <<<"$case_json")"
 strict_aggregation="$(jq -r '.strict_aggregation // empty' <<<"$case_json")"
 block_endorsement_timeout_ms="$(jq -r '.block_endorsement_timeout_ms // empty' <<<"$case_json")"
 max_rebuild_rounds="$(jq -r '.max_rebuild_rounds // empty' <<<"$case_json")"
+to_keep_override="$(jq -r '.to_keep_override // empty' <<<"$case_json")"
+to_fail_override="$(jq -r '.to_fail_override // empty' <<<"$case_json")"
+endorser_a_reject_to="$(jq -r '.endorser_a_reject_to // empty' <<<"$case_json")"
+endorser_b_reject_to="$(jq -r '.endorser_b_reject_to // empty' <<<"$case_json")"
+endorser_c_reject_to="$(jq -r '.endorser_c_reject_to // empty' <<<"$case_json")"
+endorser_a_reject_to_set="$(jq -r 'has("endorser_a_reject_to")' <<<"$case_json")"
+endorser_b_reject_to_set="$(jq -r 'has("endorser_b_reject_to")' <<<"$case_json")"
+endorser_c_reject_to_set="$(jq -r 'has("endorser_c_reject_to")' <<<"$case_json")"
+
+ssh_node() {
+  local target="$1"
+  shift
+  local ssh_cmd=(ssh -o StrictHostKeyChecking=no -n)
+  if [[ -n "$SSH_PASSWORD" ]]; then
+    if ! command -v sshpass >/dev/null 2>&1; then
+      echo "sshpass is required when SSH_PASSWORD is set" >&2
+      exit 1
+    fi
+    sshpass -p "$SSH_PASSWORD" "${ssh_cmd[@]}" "$target" "$@"
+  else
+    "${ssh_cmd[@]}" "$target" "$@"
+  fi
+}
+
+node_ssh() {
+  case "$1" in
+    node-2) echo "$NODE2_SSH" ;;
+    node-3) echo "$NODE3_SSH" ;;
+    node-4) echo "$NODE4_SSH" ;;
+    *) return 1 ;;
+  esac
+}
+
+node_restart_cmd() {
+  case "$1" in
+    node-2) echo "$NODE2_START_CMD" ;;
+    node-3) echo "$NODE3_START_CMD" ;;
+    node-4) echo "$NODE4_START_CMD" ;;
+    *) return 1 ;;
+  esac
+}
+
+restart_endorser_with_reject_to() {
+  local node="$1"
+  local reject_to="$2"
+  local target restart_cmd reject_quoted
+  target="$(node_ssh "$node")"
+  restart_cmd="$(node_restart_cmd "$node")"
+  printf -v reject_quoted '%q' "$reject_to"
+  echo "[*] restarting $node with REJECT_TO=${reject_to:-<empty>}"
+  ssh_node "$target" "REJECT_TO=$reject_quoted $restart_cmd"
+}
+
+apply_endorser_overrides() {
+  local reject_a reject_b reject_c
+  if [[ "$endorsement_mode" != "remote" ]]; then
+    return 0
+  fi
+
+  reject_a="$DEFAULT_ENDORSER_REJECT_TO"
+  reject_b="$DEFAULT_ENDORSER_REJECT_TO"
+  reject_c="$DEFAULT_ENDORSER_REJECT_TO"
+
+  if [[ "$endorser_a_reject_to_set" == "true" ]]; then
+    reject_a="$endorser_a_reject_to"
+  fi
+  if [[ "$endorser_b_reject_to_set" == "true" ]]; then
+    reject_b="$endorser_b_reject_to"
+  fi
+  if [[ "$endorser_c_reject_to_set" == "true" ]]; then
+    reject_c="$endorser_c_reject_to"
+  fi
+
+  restart_endorser_with_reject_to "node-2" "$reject_a"
+  restart_endorser_with_reject_to "node-3" "$reject_b"
+  restart_endorser_with_reject_to "node-4" "$reject_c"
+}
 
 bootstrap_env=()
 [[ -n "$batching_window_ms" ]] && bootstrap_env+=("BATCHING_WINDOW_MS=$batching_window_ms")
@@ -66,6 +151,8 @@ bootstrap_prefix=""
 if [[ ${#bootstrap_env[@]} -gt 0 ]]; then
   bootstrap_prefix="${bootstrap_env[*]} "
 fi
+
+apply_endorser_overrides
 
 if [[ -n "$NODE1_BOOTSTRAP_CMD" ]]; then
   echo "[*] bootstrapping node-1 for case=$CASE_NAME"
@@ -99,6 +186,15 @@ if [[ "$fault" != "none" ]]; then
   ./fault_injector.sh apply "$fault" "$FAULT_STATUS_DIR"
 fi
 
+effective_to_keep="${TO_KEEP}"
+effective_to_fail="${TO_FAIL}"
+if [[ -n "$to_keep_override" ]]; then
+  effective_to_keep="$to_keep_override"
+fi
+if [[ -n "$to_fail_override" ]]; then
+  effective_to_fail="$to_fail_override"
+fi
+
 case_sequencer_log="$case_dir/sequencer.log"
 sequencer_log_start=0
 if [[ -f "$SEQUENCER_LOG_PATH" ]]; then
@@ -116,8 +212,8 @@ send_args=(
   --key-fail "$KEY_FAIL"
   --addr-keep "$ADDR_KEEP"
   --addr-fail "$ADDR_FAIL"
-  --to-keep "$TO_KEEP"
-  --to-fail "$TO_FAIL"
+  --to-keep "$effective_to_keep"
+  --to-fail "$effective_to_fail"
 )
 if [[ -n "$concurrency" ]]; then
   send_args+=(--concurrency "$concurrency")

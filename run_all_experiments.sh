@@ -10,10 +10,10 @@ NODE1_RPC_URL="${NODE1_RPC_URL:-http://127.0.0.1:8547}"
 FUND_AMOUNT="${FUND_AMOUNT:-3ether}"
 NONCE_CACHE_FILE="${NONCE_CACHE_FILE:-/tmp/nitro_prepare_accounts_funder_nonce}"
 PERF_BATCHING_WINDOW_MS="${PERF_BATCHING_WINDOW_MS:-1200}"
-PERF_BOOTSTRAP_CMD="${PERF_BOOTSTRAP_CMD:-RESET_CHAIN=0 BATCHING_WINDOW_MS=${PERF_BATCHING_WINDOW_MS} ENDORSEMENT_MODE=remote DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 DEFAULT_AGGREGATION=bls STRICT_AGGREGATION=bls BLOCK_ENDORSEMENT_TIMEOUT_MS=2000 MAX_REBUILD_ROUNDS=3 bash ${NODE1_BOOTSTRAP_SCRIPT}}"
-FAULT_TX_TOTAL="${FAULT_TX_TOTAL:-40}"
+PERF_BOOTSTRAP_CMD="${PERF_BOOTSTRAP_CMD:-RESET_CHAIN=1 BATCHING_WINDOW_MS=${PERF_BATCHING_WINDOW_MS} ENDORSEMENT_MODE=remote DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 DEFAULT_AGGREGATION=bls STRICT_AGGREGATION=bls BLOCK_ENDORSEMENT_TIMEOUT_MS=2000 MAX_REBUILD_ROUNDS=3 bash ${NODE1_BOOTSTRAP_SCRIPT}}"
+FAULT_TX_TOTAL="${FAULT_TX_TOTAL:-60}"
 FAULT_TPS="${FAULT_TPS:-2}"
-FAULT_FAIL_RATIO="${FAULT_FAIL_RATIO:-0.05}"
+FAULT_FAIL_RATIO="${FAULT_FAIL_RATIO:-0.1}"
 FAULT_BATCHING_WINDOW_MS="${FAULT_BATCHING_WINDOW_MS:-2000}"
 FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS="${FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS:-5000}"
 FAULT_MAX_REBUILD_ROUNDS="${FAULT_MAX_REBUILD_ROUNDS:-5}"
@@ -22,14 +22,36 @@ FAULT_BOOTSTRAP_CMD="${FAULT_BOOTSTRAP_CMD:-RESET_CHAIN=1 BATCHING_WINDOW_MS=${F
 NODE2_SSH="${NODE2_SSH:-root@192.168.1.13}"
 NODE3_SSH="${NODE3_SSH:-root@192.168.1.6}"
 NODE4_SSH="${NODE4_SSH:-root@192.168.1.4}"
+NODE2_START_CMD="${NODE2_START_CMD:-bash /data/node2_start.sh}"
+NODE3_START_CMD="${NODE3_START_CMD:-bash /data/node3_start.sh}"
+NODE4_START_CMD="${NODE4_START_CMD:-bash /data/node4_start.sh}"
 SSH_PASSWORD="${SSH_PASSWORD:-}"
 export ACCOUNTS_DIR NODE1_RPC_URL FUND_AMOUNT NONCE_CACHE_FILE NODE1_STOP_CMD NODE2_SSH NODE3_SSH NODE4_SSH
 export SSH_PASSWORD
 
-THRESHOLD_2OF3_CMD="${THRESHOLD_2OF3_CMD:-DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 bash ${NODE1_BOOTSTRAP_SCRIPT}}"
-THRESHOLD_3OF3_CMD="${THRESHOLD_3OF3_CMD:-DEFAULT_THRESHOLD=3 STRICT_THRESHOLD=3 bash ${NODE1_BOOTSTRAP_SCRIPT}}"
-
 mkdir -p "$RESULTS_DIR"
+
+ssh_node() {
+  local target="$1"
+  shift
+  local ssh_cmd=(ssh -o StrictHostKeyChecking=no -n)
+  if [[ -n "$SSH_PASSWORD" ]]; then
+    if ! command -v sshpass >/dev/null 2>&1; then
+      echo "sshpass is required when SSH_PASSWORD is set" >&2
+      exit 1
+    fi
+    sshpass -p "$SSH_PASSWORD" "${ssh_cmd[@]}" "$target" "$@"
+  else
+    "${ssh_cmd[@]}" "$target" "$@"
+  fi
+}
+
+reset_endorsers_to_default() {
+  echo "[*] resetting endorsers to default reject configuration"
+  ssh_node "$NODE2_SSH" "$NODE2_START_CMD"
+  ssh_node "$NODE3_SSH" "$NODE3_START_CMD"
+  ssh_node "$NODE4_SSH" "$NODE4_START_CMD"
+}
 
 run_matrix_case() {
   local matrix_json="$1"
@@ -39,33 +61,19 @@ run_matrix_case() {
 }
 
 echo "[*] running correctness matrix"
-run_matrix_case "$ROOT_DIR/matrix_correctness.json" "$RESULTS_DIR/correctness"
+reset_endorsers_to_default
+NODE1_BOOTSTRAP_CMD="RESET_CHAIN=1 bash ${NODE1_BOOTSTRAP_SCRIPT}" \
+  run_matrix_case "$ROOT_DIR/matrix_correctness.json" "$RESULTS_DIR/correctness"
 
 echo "[*] running performance matrix"
-echo "[*] bootstrapping node-1 for performance matrix"
-bash -lc "$PERF_BOOTSTRAP_CMD"
-run_matrix_case "$ROOT_DIR/matrix_performance.json" "$RESULTS_DIR/performance"
+reset_endorsers_to_default
+NODE1_BOOTSTRAP_CMD="RESET_CHAIN=1 bash ${NODE1_BOOTSTRAP_SCRIPT}" \
+  run_matrix_case "$ROOT_DIR/matrix_performance.json" "$RESULTS_DIR/performance"
 
-echo "[*] running threshold cases"
-for case_name in threshold_2of3_fail20 threshold_3of3_fail20 threshold_2of3_fail40 threshold_3of3_fail40; do
-  case_env="$ACCOUNTS_DIR/$case_name.env"
-  if [[ "$case_name" == threshold_2of3* ]]; then
-    bootstrap_cmd="$THRESHOLD_2OF3_CMD"
-  else
-    bootstrap_cmd="$THRESHOLD_3OF3_CMD"
-  fi
-
-  echo "[*] bootstrapping node-1 for threshold case=$case_name"
-  bash -lc "$bootstrap_cmd"
-
-  echo "[*] preparing fresh accounts for threshold case=$case_name"
-  rm -f "$NONCE_CACHE_FILE"
-  "$ROOT_DIR/prepare_accounts.sh" "$case_env"
-
-  echo "[*] running threshold case=$case_name"
-  NODE1_BOOTSTRAP_CMD= \
-    "$ROOT_DIR/run_case.sh" "$ROOT_DIR/matrix_threshold.json" "$case_name" "$case_env" "$RESULTS_DIR/threshold"
-done
+echo "[*] running threshold matrix"
+reset_endorsers_to_default
+NODE1_BOOTSTRAP_CMD="RESET_CHAIN=1 bash ${NODE1_BOOTSTRAP_SCRIPT}" \
+  run_matrix_case "$ROOT_DIR/matrix_threshold.json" "$RESULTS_DIR/threshold"
 
 echo "[*] running fault matrix"
 FAULT_MATRIX_FILE="$(mktemp /tmp/nitro_fault_matrix.XXXXXX.json)"
@@ -94,6 +102,7 @@ jq \
   "$ROOT_DIR/matrix_fault.json" > "$FAULT_MATRIX_FILE"
 
 echo "[*] fault defaults: tx_total=$FAULT_TX_TOTAL tps=$FAULT_TPS fail_ratio=$FAULT_FAIL_RATIO batching_window_ms=$FAULT_BATCHING_WINDOW_MS timeout_ms=$FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS max_rebuild_rounds=$FAULT_MAX_REBUILD_ROUNDS"
+reset_endorsers_to_default
 echo "[*] stopping existing node-1 before fault matrix"
 bash -lc "$NODE1_STOP_CMD"
 sleep 3

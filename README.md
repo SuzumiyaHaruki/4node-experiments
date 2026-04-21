@@ -119,8 +119,8 @@ NODE2_SSH=root@192.168.1.13 NODE3_SSH=root@192.168.1.6 NODE4_SSH=root@192.168.1.
 
 注意：
 
-- `threshold` 会在每个 case 前重新 bootstrap `node-1`，然后重新准备该 case 的账户文件，再发送 workload。
-- `fault` 会在进入 fault 矩阵前先把 `node-1` 重新 bootstrap 到 `2-of-3`，然后重新准备账户池，避免上一个实验阶段留下的运行态和 nonce 缓存影响后续发送。
+- `correctness`、`performance`、`threshold` 都会按 case 重新 bootstrap `node-1`，避免不同模式之间互相污染。
+- `fault` 会在进入 fault 矩阵前先把 `node-1` 固定到 `2-of-3` 远程背书配置，再统一跑“正常 -> 单节点延迟 -> 单节点失效 -> 双节点失效”这条退化路径。
 
 ## 前置条件
 
@@ -156,7 +156,7 @@ cd /home/nitro/Desktop/experiments
 ### 2. 跑一个 case
 
 ```bash
-./run_case.sh ./matrix_correctness.json correct_1keep_1fail ./accounts_pool/correct_1keep_1fail.env ./exp_correctness/correct_1keep_1fail
+./run_case.sh ./matrix_correctness.json correct_1keep_1fail_same_block ./accounts_pool/correct_1keep_1fail_same_block.env ./exp_correctness/correct_1keep_1fail_same_block
 ```
 
 ### 3. 跑整张矩阵
@@ -215,7 +215,7 @@ cd /home/nitro/Desktop/experiments
 
 ### 1. Correctness
 
-目标是验证在不同 keep/fail 组合下，交易是否都能按预期完成。
+目标是验证在不同 keep/fail 组合下，交易是否都能按预期完成，并尽量把小批交易压进同一个候选块。
 
 推荐先跑整张矩阵：
 
@@ -228,25 +228,25 @@ cd /home/nitro/Desktop/experiments
 
 - `correct_single_keep`
 - `correct_single_fail`
-- `correct_1keep_1fail`
-- `correct_2keep_1fail`
-- `correct_2fail_1keep`
+- `correct_1keep_1fail_same_block`
+- `correct_2keep_1fail_same_block`
+- `correct_1keep_2fail_same_block`
 
 如果你只想先看单个 case，可以直接跑：
 
 ```bash
-./run_case.sh ./matrix_correctness.json correct_1keep_1fail ./accounts_pool/correct_1keep_1fail.env ./results/correctness
+./run_case.sh ./matrix_correctness.json correct_1keep_1fail_same_block ./accounts_pool/correct_1keep_1fail_same_block.env ./results/correctness
 ```
 
 这类实验通常不需要改 `node-1` 启动参数。
 
 ### 2. Performance
 
-目标是观察不同流量和失败比例下的延迟、吞吐和成功率。
+目标是比较基线模式和远程背书模式在 keep-only / mixed load 下的差异。
 
-这一组现在使用 `send_mode=concurrent`，也就是先并发提交一批交易，再统一等回执。当前默认配置把 `tx_total` 提到 `120`，`tps` 提到 `20`，并把 batching window 调到 `1.2 秒`，同时把并发度设成 `20`，这样更容易把大约 20 笔交易压进同一个区块，观察 `10% fail` 和 `30% fail` 的差异。
+这一组现在只保留 `baseline` 和 `remote`，不再包含 `local` 本地背书。默认仍使用 `send_mode=concurrent`，并维持统一的 `tx_total=120`、`tps=4`、`concurrency=4`、`batching_window_ms=1200`，让五组 performance case 具有更直接的可比性。
 
-同时，`run_all_experiments.sh` 在进入 performance 矩阵前会先把 `node-1` 切到 1 秒 batching window 的 burst 配置，但不会清掉链上余额和账户。
+同时，`run_all_experiments.sh` 在 performance 阶段会按 case 重新 bootstrap `node-1`，避免 `baseline` 和 `remote` 共用同一个运行态。
 
 推荐直接跑整张矩阵：
 
@@ -258,52 +258,35 @@ cd /home/nitro/Desktop/experiments
 常见 case 包括：
 
 - `perf_baseline_keep_only`
-- `perf_local_keep_only`
 - `perf_remote_keep_only`
 - `perf_remote_mixed_10pct_fail`
 - `perf_remote_mixed_30pct_fail`
 
-这些 case 默认的 `tx_total` 都是 120，`tps` 都是 20，`send_mode` 都是 `concurrent`，并发度是 `20`。
+这些 case 默认的 `tx_total` 都是 120，`tps` 都是 4，`send_mode` 都是 `concurrent`，并发度是 `4`。
 如果你想自己做一个更小的 smoke test，可以单独跑一个 case，再把 `tx_total` 和 `tps` 改小一点，先确认链路没问题。
 
 ### 3. Threshold
 
-目标是比较不同背书阈值下的行为，例如 `2of3` 和 `3of3`。
+目标是比较不同背书阈值下的行为边界，例如 `2-of-3` 和 `3-of-3` 在正常场景、以及“只有一个背书节点拒签”场景下的差异。
 
-这类实验的关键点是：**每个 case 之前需要把 `node-1` 用对应阈值重新拉起**。  
-本目录里已经预留了 `NODE1_BOOTSTRAP_CMD`，所以你可以在 `run_case.sh` 前先重启 `node-1`。
-
-推荐做法是直接配合 `NODE1_BOOTSTRAP_CMD` 跑单个 case：
-
-```bash
-cd /home/nitro/Desktop/experiments
-NODE1_BOOTSTRAP_CMD='DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 bash /home/nitro/Desktop/endorsement/scripts/node1_redeploy.sh' \
-  ./run_case.sh ./matrix_threshold.json threshold_2of3_fail20 ./accounts_pool/threshold_2of3_fail20.env ./results/threshold
-```
-
-如果你想切成 `3of3`，就改成：
-
-```bash
-NODE1_BOOTSTRAP_CMD='DEFAULT_THRESHOLD=3 STRICT_THRESHOLD=3 bash /home/nitro/Desktop/endorsement/scripts/node1_redeploy.sh' \
-  ./run_case.sh ./matrix_threshold.json threshold_3of3_fail20 ./accounts_pool/threshold_3of3_fail20.env ./results/threshold
-```
+这类实验已经内置到矩阵里，`run_all_experiments.sh` 会在每个 threshold case 之前自动重新拉起 `node-1`，并按 case 重配 A/B/C 背书节点的拒签地址。
 
 矩阵里常见 case 有：
 
-- `threshold_2of3_fail20`
-- `threshold_3of3_fail20`
-- `threshold_2of3_fail40`
-- `threshold_3of3_fail40`
+- `threshold_normal_2of3`
+- `threshold_normal_3of3`
+- `threshold_partial_reject_2of3`
+- `threshold_partial_reject_3of3`
 
 建议每跑一个 case 前先确认 `node-1` 已经起来，并且三个 `endorser` 的 `/healthz` 都正常。
 
 ### 4. Fault
 
-目标是验证延迟和宕机故障下的系统表现。
+目标是验证在固定 `2-of-3` 远程背书配置下，系统从正常状态到延迟退化、再到节点失效的退化路径。
 
-当前默认的 fault 矩阵比之前更温和一些：`tx_total=40`、`tps=2`、`fail_ratio=0.05`，`batching_window_ms=2000`，`block_endorsement_timeout_ms=5000`，`max_rebuild_rounds=5`。
+当前默认的 fault 矩阵使用：`tx_total=60`、`tps=2`、`fail_ratio=0.1`，`batching_window_ms=2000`，`block_endorsement_timeout_ms=5000`，`max_rebuild_rounds=5`。
 
-在跑 fault 矩阵之前，`run_all_experiments.sh` 会先安全停掉旧的 `node-1`，再用一条干净的链重新 bootstrap 到 `DEFAULT_THRESHOLD=2`、`STRICT_THRESHOLD=3` 的运行态。这样不会继承 threshold 阶段留下的 `3-of-3` 配置，也不会撞上 `datadir already used by another process`。
+在跑 fault 矩阵之前，`run_all_experiments.sh` 会先安全停掉旧的 `node-1`，再用一条干净的链重新 bootstrap 到 `DEFAULT_THRESHOLD=2`、`STRICT_THRESHOLD=3` 的运行态。这样不会继承 threshold 阶段留下的更激进配置，也不会撞上 `datadir already used by another process`。
 
 推荐直接跑整张矩阵：
 
@@ -318,14 +301,14 @@ cd /home/nitro/Desktop/experiments
 - `fault_delay_100ms`
 - `fault_delay_300ms`
 - `fault_delay_500ms`
-- `fault_down_1`
-- `fault_down_2`
+- `fault_down_1_degraded`
+- `fault_down_2_unavailable`
 
 其中：
 
 - `delay:node-2:100ms` 表示给 `node-2` 加 100ms 延迟
-- `down:node-2` 表示停掉 `node-2`
-- `down:node-2,node-3` 表示同时停掉两台
+- `down:node-2` 表示停掉 1 个背书节点，观察系统在 `2-of-3` 下的退化表现
+- `down:node-2,node-3` 表示同时停掉两台，观察低于门限后的不可用表现
 
 故障实验的前提是：
 
@@ -374,5 +357,5 @@ DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 bash /home/nitro/Desktop/endorsement/scri
 ## 说明
 
 - 这套脚本是裸机版，不再依赖 Docker Compose。
-- `run_matrix.sh` 默认只负责跑 workload，不会替你自动切换 `node-1` 的阈值配置。
-- 如果你要做阈值实验，建议给 `run_case.sh` 传 `NODE1_BOOTSTRAP_CMD`，在每个 case 之前重启一次 `node-1`。
+- `run_matrix.sh` 会按矩阵逐个 case 跑 workload，本身不负责额外做实验分析。
+- `run_all_experiments.sh` 已经内置了 correctness / performance / threshold / fault 四组实验需要的 bootstrap 顺序和恢复动作。
