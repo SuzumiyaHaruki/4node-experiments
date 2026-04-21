@@ -64,6 +64,22 @@
     "fault": "delay:node-2:500ms"
   },
   {
+    "name": "fault_down_1_slowhang",
+    "mode": "remote",
+    "default_threshold": 2,
+    "strict_threshold": 3,
+    "default_aggregation": "bls",
+    "strict_aggregation": "bls",
+    "batching_window_ms": 2000,
+    "block_endorsement_timeout_ms": 2000,
+    "max_rebuild_rounds": 5,
+    "use_account_pool": true,
+    "tx_total": 60,
+    "tps": 2,
+    "fail_ratio": 0.1,
+    "fault": "delay:node-2:5000ms"
+  },
+  {
     "name": "fault_down_1_degraded",
     "mode": "remote",
     "default_threshold": 2,

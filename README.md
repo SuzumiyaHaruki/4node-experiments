@@ -301,12 +301,14 @@ cd /home/nitro/Desktop/experiments
 - `fault_delay_100ms`
 - `fault_delay_300ms`
 - `fault_delay_500ms`
+- `fault_down_1_slowhang`
 - `fault_down_1_degraded`
 - `fault_down_2_unavailable`
 
 其中：
 
 - `delay:node-2:100ms` 表示给 `node-2` 加 100ms 延迟
+- `delay:node-2:5000ms` 配合更短的 block endorsement timeout，可以模拟“节点不立即失败，但慢到等价于超时”的单节点挂起场景
 - `down:node-2` 表示停掉 1 个背书节点，观察系统在 `2-of-3` 下的退化表现
 - `down:node-2,node-3` 表示同时停掉两台，观察低于门限后的不可用表现
 
