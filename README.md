@@ -303,7 +303,7 @@ NODE1_BOOTSTRAP_CMD='DEFAULT_THRESHOLD=3 STRICT_THRESHOLD=3 bash /home/nitro/Des
 
 当前默认的 fault 矩阵比之前更温和一些：`tx_total=40`、`tps=2`、`fail_ratio=0.05`，`batching_window_ms=2000`，`block_endorsement_timeout_ms=5000`，`max_rebuild_rounds=5`。
 
-在跑 fault 矩阵之前，`run_all_experiments.sh` 会先把 `node-1` 重新 bootstrap 到 `DEFAULT_THRESHOLD=2`、`STRICT_THRESHOLD=3` 的运行态，这样不会继承 threshold 阶段留下的 `3-of-3` 配置。
+在跑 fault 矩阵之前，`run_all_experiments.sh` 会先安全停掉旧的 `node-1`，再把它重新 bootstrap 到 `DEFAULT_THRESHOLD=2`、`STRICT_THRESHOLD=3` 的运行态，这样不会继承 threshold 阶段留下的 `3-of-3` 配置，也不会撞上 `datadir already used by another process`。
 
 推荐直接跑整张矩阵：
 
