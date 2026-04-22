@@ -166,13 +166,20 @@ def main():
     success_per_block_avg = None
     if unique_success_blocks > 0:
         success_per_block_avg = round(tx_receipt_count / unique_success_blocks, 3)
-    success_rate = round(tx_receipt_count / len(rows), 4) if rows else None
+    tx_total = len(rows)
+    success_rate = round(tx_receipt_count / tx_total, 4) if rows else None
     success_tps = None
     attempt_tps = None
+    effective_ms_per_attempt = None
+    effective_ms_per_success = None
     if workload_makespan_ms and workload_makespan_ms > 0:
         duration_s = workload_makespan_ms / 1000.0
         success_tps = round(tx_receipt_count / duration_s, 3)
-        attempt_tps = round(len(rows) / duration_s, 3)
+        attempt_tps = round(tx_total / duration_s, 3)
+        if tx_total > 0:
+            effective_ms_per_attempt = round(workload_makespan_ms / tx_total, 3)
+        if tx_receipt_count > 0:
+            effective_ms_per_success = round(workload_makespan_ms / tx_receipt_count, 3)
     rebuilds_per_success_tx = None
     endorsement_failed_per_success_tx = None
     remote_requests_per_success_tx = None
@@ -183,12 +190,16 @@ def main():
 
     summary = {
         "case_name": args.case_name,
-        "tx_total": len(rows),
+        "tx_total": tx_total,
         "tx_receipt_count": tx_receipt_count,
         "tx_error_count": tx_error_count,
         "tx_timeout_count": tx_timeout_count,
         "tx_send_error_count": tx_send_error_count,
         "tx_receipt_error_count": tx_receipt_error_count,
+        "lat_success_avg_ms": round(mean(latencies), 3) if latencies else None,
+        "lat_success_p50_ms": round(percentile(latencies, 0.50), 3) if latencies else None,
+        "lat_success_p95_ms": round(percentile(latencies, 0.95), 3) if latencies else None,
+        "lat_success_p99_ms": round(percentile(latencies, 0.99), 3) if latencies else None,
         "lat_avg_ms": round(mean(latencies), 3) if latencies else None,
         "lat_p50_ms": round(percentile(latencies, 0.50), 3) if latencies else None,
         "lat_p95_ms": round(percentile(latencies, 0.95), 3) if latencies else None,
@@ -197,6 +208,8 @@ def main():
         "success_rate": success_rate,
         "success_tps": success_tps,
         "attempt_tps": attempt_tps,
+        "effective_ms_per_attempt": effective_ms_per_attempt,
+        "effective_ms_per_success": effective_ms_per_success,
         "unique_success_blocks": unique_success_blocks,
         "success_per_block_avg": success_per_block_avg,
         "keep_total": len(keep_rows),
