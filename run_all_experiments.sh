@@ -58,24 +58,31 @@ reset_endorsers_to_default() {
 run_matrix_case() {
   local matrix_json="$1"
   local out_dir="$2"
+  local bootstrap_cmd="${3:-}"
   mkdir -p "$out_dir"
-  "$ROOT_DIR/run_matrix.sh" "$matrix_json" "$out_dir"
+  NODE1_BOOTSTRAP_CMD="$bootstrap_cmd" "$ROOT_DIR/run_matrix.sh" "$matrix_json" "$out_dir"
 }
 
 echo "[*] running correctness matrix"
 reset_endorsers_to_default
-NODE1_BOOTSTRAP_CMD="RESET_CHAIN=1 bash ${NODE1_BOOTSTRAP_SCRIPT}" \
-  run_matrix_case "$ROOT_DIR/matrix_correctness.json" "$RESULTS_DIR/correctness"
+run_matrix_case \
+  "$ROOT_DIR/matrix_correctness.json" \
+  "$RESULTS_DIR/correctness" \
+  "RESET_CHAIN=1 bash ${NODE1_BOOTSTRAP_SCRIPT}"
 
 echo "[*] running performance matrix"
 reset_endorsers_to_default
-NODE1_BOOTSTRAP_CMD="RESET_CHAIN=1 bash ${NODE1_BOOTSTRAP_SCRIPT}" \
-  run_matrix_case "$ROOT_DIR/matrix_performance.json" "$RESULTS_DIR/performance"
+run_matrix_case \
+  "$ROOT_DIR/matrix_performance.json" \
+  "$RESULTS_DIR/performance" \
+  "RESET_CHAIN=1 bash ${NODE1_BOOTSTRAP_SCRIPT}"
 
 echo "[*] running threshold matrix"
 reset_endorsers_to_default
-NODE1_BOOTSTRAP_CMD="RESET_CHAIN=1 bash ${NODE1_BOOTSTRAP_SCRIPT}" \
-  run_matrix_case "$ROOT_DIR/matrix_threshold.json" "$RESULTS_DIR/threshold"
+run_matrix_case \
+  "$ROOT_DIR/matrix_threshold.json" \
+  "$RESULTS_DIR/threshold" \
+  "RESET_CHAIN=1 bash ${NODE1_BOOTSTRAP_SCRIPT}"
 
 echo "[*] running fault matrix"
 FAULT_MATRIX_FILE="$(mktemp /tmp/nitro_fault_matrix.XXXXXX.json)"
@@ -115,6 +122,6 @@ sleep 3
 echo "[*] bootstrapping node-1 for fault matrix"
 bash -lc "$FAULT_BOOTSTRAP_CMD"
 NODE2_SSH="$NODE2_SSH" NODE3_SSH="$NODE3_SSH" NODE4_SSH="$NODE4_SSH" SSH_PASSWORD="$SSH_PASSWORD" \
-  run_matrix_case "$FAULT_MATRIX_FILE" "$RESULTS_DIR/fault"
+  run_matrix_case "$FAULT_MATRIX_FILE" "$RESULTS_DIR/fault" ""
 
 echo "[*] all experiments finished, results in $RESULTS_DIR"
