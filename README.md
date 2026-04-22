@@ -1,365 +1,363 @@
-# 裸机实验脚本
+# 裸机实验脚本说明
 
-这是一个独立的实验仓库，用来在 4 台裸机/云主机上复现实验。
+这个目录用于在 4 台裸机或云主机上复现实验，不依赖 Docker Compose。当前默认拓扑为：
 
-它的定位是：
+- `node-1`：Sequencer / RPC / 实验驱动节点
+- `node-2`：背书节点 A
+- `node-3`：背书节点 B
+- `node-4`：背书节点 C
 
-- 基于 `node-1` + `node-2/3/4` 的四机拓扑
-- 不依赖 Docker Compose
-- 可直接用于 correctness / performance / threshold / fault 四类实验
-- 产物会落在本目录下的 `results/`、`accounts_pool/` 等目录中，便于归档和重复实验
+实验覆盖四类场景：
 
-这套脚本的思路参考了 `endorsement/nitro-testnode/experiments`，但改成了更适合当前裸机部署的版本。
+- `correctness`：正确性实验
+- `performance`：基础性能实验
+- `threshold`：阈值配置实验
+- `fault`：故障注入实验
+
+实验运行过程中生成的主要产物包括：
+
+- `accounts_pool/`：为各 case 预生成的账户文件和账户池
+- `results/`：各类实验输出目录
+- `results/<group>/<case>/tx_results.csv`
+- `results/<group>/<case>/summary.json`
+- `results/<group>/<case>/summary.tsv`
+- `results/<group>/<case>/sequencer.log`
+
+如果你想查看参数和指标定义，请同时参考：
+
+- [PARAMETERS_AND_METRICS.md](/home/nitro/Desktop/experiments/PARAMETERS_AND_METRICS.md)
 
 ## 仓库结构
 
-- `README.md`：仓库说明和使用方式
-- `prepare_accounts.sh`：准备单个 case 的账户
-- `prepare_accounts_pool.sh`：批量准备矩阵账户
-- `send_workload.sh`：向 `node-1` 发交易
-- `run_case.sh`：执行单个实验 case
-- `run_matrix.sh`：按矩阵批量执行 case
+- `README.md`：实验运行说明
+- `PARAMETERS_AND_METRICS.md`：参数配置与统计口径说明
+- `matrix_correctness.json`：正确性实验矩阵
+- `matrix_performance.json`：基础性能实验矩阵
+- `matrix_threshold.json`：阈值实验矩阵
+- `matrix_fault.json`：故障实验矩阵
+- `prepare_accounts.sh`：生成单个 case 的基础账户文件
+- `prepare_accounts_pool.sh`：为整张矩阵生成基础账户文件
+- `prepare_keep_pool.sh`：为 keep 交易生成账户池
+- `prepare_fail_pool.sh`：为 fail 交易生成账户池
+- `send_workload.sh`：发送交易并记录逐笔结果
+- `run_case.sh`：执行单个 case
+- `run_matrix.sh`：执行整张矩阵
 - `run_all_experiments.sh`：按顺序执行四类实验
 - `fault_injector.sh`：通过 SSH 对背书节点注入故障
-- `extract_metrics.py`：汇总交易结果和日志指标
-- `matrix_*.json`：四类实验矩阵
+- `extract_metrics.py`：从 `tx_results.csv` 和日志中提取汇总指标
+- `generate_thesis_figures.py`：从 `results/` 生成论文图表
 
-## 输出目录约定
+## 前置条件
 
-建议把实验输出放在仓库内的独立目录中，例如：
+### 1. 四台机器的软件准备
+
+所有实验机建议具备以下命令：
+
+- `bash`
+- `curl`
+- `jq`
+- `python3`
+- `ssh`
+- `scp`
+
+`node-1` 还需要：
+
+- `cast`
+
+如果需要使用密码登录的故障注入和远程重启能力，还需要：
+
+- `sshpass`
+
+### 2. 节点部署准备
+
+在跑实验前，默认你已经完成以下部署：
+
+- `node-2`、`node-3`、`node-4` 已经部署好 `nitro-val + endorser`
+- 对应机器上已有：
+  - `/data/node2_start.sh`
+  - `/data/node3_start.sh`
+  - `/data/node4_start.sh`
+- `node-1` 上已有：
+  - `/data/node1_redeploy.sh`
+- `node-1` 的 RPC 可通过 `http://127.0.0.1:8547` 访问
+
+### 3. 连通性检查
+
+推荐在 `node-1` 上先检查：
+
+```bash
+cast chain-id --rpc-url http://127.0.0.1:8547
+cast block-number --rpc-url http://127.0.0.1:8547
+
+curl -fsS http://192.168.1.13:9001/healthz && echo
+curl -fsS http://192.168.1.6:9002/healthz && echo
+curl -fsS http://192.168.1.4:9003/healthz && echo
+```
+
+如果以上命令都能正常返回，再开始跑实验。
+
+## 结果目录约定
+
+推荐统一把结果放在仓库内的 `results/` 下：
 
 - `results/correctness`
 - `results/performance`
 - `results/threshold`
 - `results/fault`
 
-脚本默认不会覆盖仓库里的脚本文件，只会在你指定的输出目录里生成：
+每个 case 目录通常包含：
 
-- `tx_results.csv`
-- `summary.json`
-- `summary.tsv`
+- `tx_results.csv`：逐笔交易结果
+- `summary.json`：该 case 的汇总指标
+- `summary.tsv`：便于快速查看的表格形式
+- `sequencer.log`：仅截取该 case 运行期间的 sequencer 日志
 
-## 目录内容
+## 最常用的运行方式
 
-- `prepare_accounts.sh`
-- `prepare_accounts_pool.sh`
-- `send_workload.sh`
-- `run_case.sh`
-- `run_matrix.sh`
-- `fault_injector.sh`
-- `extract_metrics.py`
-- `matrix_correctness.json`
-- `matrix_fault.json`
-- `matrix_threshold.json`
-- `matrix_performance.json`
+## 1. 更新仓库
 
-## 总体流程
-
-1. 先确认 4 台机器已经通过 `scripts/` 里的启动脚本部署完成。
-2. 在 `node-1` 上确保 `http://127.0.0.1:8547` 可用。
-3. 用 `prepare_accounts_pool.sh` 为某个矩阵批量准备账户。
-4. 用 `run_case.sh` 跑单个 case，或者用 `run_matrix.sh` 跑整张矩阵。
-5. 需要故障注入时，用 `fault_injector.sh` 手动对某台背书节点加延迟或停机。
-
-## 推荐使用方式
-
-如果你想把“拉取仓库”和“准备账户”留在命令行里，把“正式执行实验”收进脚本，推荐按下面的顺序来：
-
-### 1. 拉取实验仓库
+如果仓库已经存在：
 
 ```bash
 cd /data/4node-experiments
 git pull --ff-only
 ```
 
-如果你第一次拉取：
+如果是第一次拉取：
 
 ```bash
 git clone git@github.com:SuzumiyaHaruki/4node-experiments.git /data/4node-experiments
 cd /data/4node-experiments
 ```
 
-### 2. 准备账户
+## 2. 一键跑完整实验
 
-先为所有矩阵生成账户池：
+这是最推荐的用法，适合正式跑一轮完整实验。
 
 ```bash
 cd /data/4node-experiments
-FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_correctness.json ./accounts_pool
-FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_performance.json ./accounts_pool
-FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_threshold.json ./accounts_pool
-FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_fault.json ./accounts_pool
+export SSH_PASSWORD='你的密码'
+./run_all_experiments.sh
 ```
 
 说明：
 
-- `prepare_accounts_pool.sh` 会在开始时自动清空 nonce 缓存，避免前一轮实验重启 `node-1` 后留下旧 nonce。
-- 如果你确实想保留缓存，可以设置 `KEEP_NONCE_CACHE=1`。
+- `correctness`、`performance`、`threshold` 会按 case 重新 bootstrap `node-1`
+- `fault` 会先统一把 `node-1` 切到故障实验所需运行态，再依次执行故障矩阵
+- 每类实验开始前，脚本都会尝试把三台背书节点恢复到默认配置
 
-### 3. 执行实验
+## 3. 只跑某一类实验
 
-直接运行总脚本：
+### 只跑 correctness
 
 ```bash
 cd /data/4node-experiments
-./run_all_experiments.sh
+rm -rf ./results/correctness
+mkdir -p ./results/correctness
+NODE1_BOOTSTRAP_CMD='RESET_CHAIN=1 bash /data/node1_redeploy.sh' \
+  ./run_matrix.sh ./matrix_correctness.json ./results/correctness
 ```
 
-如果你的 `node1_redeploy.sh` 不在默认路径 `/data/node1_redeploy.sh`，可以这样指定：
+### 只跑 performance
 
 ```bash
-NODE1_BOOTSTRAP_SCRIPT=/home/nitro/Desktop/endorsement/scripts/node1_redeploy.sh ./run_all_experiments.sh
+cd /data/4node-experiments
+rm -rf ./results/performance
+mkdir -p ./results/performance
+NODE1_BOOTSTRAP_CMD='RESET_CHAIN=1 bash /data/node1_redeploy.sh' \
+  ./run_matrix.sh ./matrix_performance.json ./results/performance
 ```
 
-如果你的 `node-2/3/4` SSH 地址和默认值不同，也可以在执行前覆盖：
+### 只跑 threshold
 
 ```bash
-NODE2_SSH=root@192.168.1.13 NODE3_SSH=root@192.168.1.6 NODE4_SSH=root@192.168.1.4 ./run_all_experiments.sh
+cd /data/4node-experiments
+rm -rf ./results/threshold
+mkdir -p ./results/threshold
+export SSH_PASSWORD='你的密码'
+NODE1_BOOTSTRAP_CMD='RESET_CHAIN=1 bash /data/node1_redeploy.sh' \
+  ./run_matrix.sh ./matrix_threshold.json ./results/threshold
 ```
 
 注意：
 
-- `correctness`、`performance`、`threshold` 都会按 case 重新 bootstrap `node-1`，避免不同模式之间互相污染。
-- `fault` 会在进入 fault 矩阵前先把 `node-1` 固定到 `2-of-3` 远程背书配置，再统一跑“正常 -> 单节点延迟 -> 单节点失效 -> 双节点失效”这条退化路径。
+- `threshold` 这一组必须带 `NODE1_BOOTSTRAP_CMD`
+- 否则 `node-1` 可能沿用旧运行态，导致阈值实验实际没有切换到目标门限
 
-## 前置条件
-
-### 所有实验机
-
-- `cast`
-- `jq`
-- `python3`
-- `curl`
-- `ssh`
-- `scp`
-
-### `node-1`
-
-- `cast` 可以连到 `http://127.0.0.1:8547`
-- 3 台背书节点已经可达
-
-### 3 台背书节点
-
-- `node-2`、`node-3`、`node-4` 的 `endorser` 已启动
-- 如果要用 `fault_injector.sh` 的 `down`/`clear`，建议把 `node2_start.sh`、`node3_start.sh`、`node4_start.sh`
-  也拷到对应机器的 `/data/` 下
-
-## 快速开始
-
-### 1. 批量准备账户
+### 只跑 fault
 
 ```bash
-cd /home/nitro/Desktop/experiments
-./prepare_accounts_pool.sh ./matrix_correctness.json ./accounts_pool
-```
-
-### 2. 跑一个 case
-
-```bash
-./run_case.sh ./matrix_correctness.json correct_1keep_1fail_same_block ./accounts_pool/correct_1keep_1fail_same_block.env ./exp_correctness/correct_1keep_1fail_same_block
-```
-
-### 3. 跑整张矩阵
-
-```bash
-./run_matrix.sh ./matrix_correctness.json ./exp_correctness
-```
-
-## 运行时覆盖
-
-### `prepare_accounts.sh`
-
-- `L2_RPC_URL`
-- `FUNDER_KEY`
-- `FUND_AMOUNT`
-- `NONCE_CACHE_FILE`
-
-### `run_case.sh`
-
-- `NODE1_BOOTSTRAP_CMD`
-  - 如果设置了这个变量，脚本会在每个 case 开始前执行它
-  - 适合做阈值实验时切换 `node-1` 启动参数
-- `NODE1_RPC_URL`
-- `NODE2_SSH`
-- `NODE3_SSH`
-- `NODE4_SSH`
-
-### `fault_injector.sh`
-
-- `NODE2_SSH`
-- `NODE3_SSH`
-- `NODE4_SSH`
-- `SSH_PASSWORD`
-  - 如果三台机器还在使用密码登录，可以配合 `sshpass` 使用，避免每次手动输入
-- `NODE2_START_CMD`
-- `NODE3_START_CMD`
-- `NODE4_START_CMD`
-- `FAULT_NETDEV`
-  - 如果自动探测到的网卡不对，可以显式指定，例如 `ens3`
-
-## 推荐实验顺序
-
-1. `matrix_correctness.json`
-2. `matrix_performance.json`
-3. `matrix_threshold.json`
-4. `matrix_fault.json`
-
-## 各类实验怎么跑
-
-下面默认你已经：
-
-1. 用 `scripts/` 里的脚本把 4 台机器部署好了
-2. `node-1` 的 RPC 已经可用，默认是 `http://127.0.0.1:8547`
-3. `node-2/3/4` 的 `nitro-val + endorser` 都在运行
-4. 在 `./experiments` 目录下执行命令
-
-### 1. Correctness
-
-目标是验证在不同 keep/fail 组合下，交易是否都能按预期完成，并尽量把小批交易压进同一个候选块。
-
-推荐先跑整张矩阵：
-
-```bash
-cd /home/nitro/Desktop/experiments
-./run_matrix.sh ./matrix_correctness.json ./results/correctness
-```
-
-这会依次跑下面这些 case：
-
-- `correct_single_keep`
-- `correct_single_fail`
-- `correct_1keep_1fail_same_block`
-- `correct_2keep_1fail_same_block`
-- `correct_1keep_2fail_same_block`
-
-如果你只想先看单个 case，可以直接跑：
-
-```bash
-./run_case.sh ./matrix_correctness.json correct_1keep_1fail_same_block ./accounts_pool/correct_1keep_1fail_same_block.env ./results/correctness
-```
-
-这类实验通常不需要改 `node-1` 启动参数。
-
-### 2. Performance
-
-目标是比较基线模式和远程背书模式在 keep-only / mixed load 下的差异。
-
-这一组现在只保留 `baseline` 和 `remote`，不再包含 `local` 本地背书。默认仍使用 `send_mode=concurrent`，并维持统一的 `tx_total=120`、`tps=4`、`concurrency=4`、`batching_window_ms=1200`，让五组 performance case 具有更直接的可比性。
-
-同时，`run_all_experiments.sh` 在 performance 阶段会按 case 重新 bootstrap `node-1`，避免 `baseline` 和 `remote` 共用同一个运行态。
-
-推荐直接跑整张矩阵：
-
-```bash
-cd /home/nitro/Desktop/experiments
-./run_matrix.sh ./matrix_performance.json ./results/performance
-```
-
-常见 case 包括：
-
-- `perf_baseline_keep_only`
-- `perf_remote_keep_only`
-- `perf_remote_mixed_10pct_fail`
-- `perf_remote_mixed_30pct_fail`
-
-这些 case 默认的 `tx_total` 都是 120，`tps` 都是 4，`send_mode` 都是 `concurrent`，并发度是 `4`。
-如果你想自己做一个更小的 smoke test，可以单独跑一个 case，再把 `tx_total` 和 `tps` 改小一点，先确认链路没问题。
-
-### 3. Threshold
-
-目标是比较不同背书阈值下的行为边界，例如 `2-of-3` 和 `3-of-3` 在正常场景、以及“只有一个背书节点对普通 keep 交易定向拒签”场景下的差异。
-
-这类实验已经内置到矩阵里，`run_all_experiments.sh` 会在每个 threshold case 之前自动重新拉起 `node-1`，并按 case 重配 A/B/C 背书节点的拒签地址。
-其中 `threshold_partial_reject_*` 不再把交易发送到 fail 地址，而是继续发送到普通 keep 地址 `0x2222...2222`，仅让 endorser A 对这个 keep 地址定向拒签。这样测到的是“普通交易在部分拒签下的门限差异”，而不是 fail/strict policy 的语义。
-
-矩阵里常见 case 有：
-
-- `threshold_normal_2of3`
-- `threshold_normal_3of3`
-- `threshold_partial_reject_2of3`
-- `threshold_partial_reject_3of3`
-
-建议每跑一个 case 前先确认 `node-1` 已经起来，并且三个 `endorser` 的 `/healthz` 都正常。
-
-### 4. Fault
-
-目标是验证在固定 `2-of-3` 远程背书配置下，系统从正常状态到延迟退化、再到节点失效的退化路径。
-
-当前默认的 fault 矩阵使用：`tx_total=60`、`tps=4`、`send_mode=concurrent`、`concurrency=4`、`fail_ratio=0.1`，`batching_window_ms=2000`，`block_endorsement_timeout_ms=5000`，`max_rebuild_rounds=5`。
-这样 fault 组也会尽量形成稳定的块内聚合，而不是退化成近似一块一笔的发送节奏。
-
-在跑 fault 矩阵之前，`run_all_experiments.sh` 会先安全停掉旧的 `node-1`，再用一条干净的链重新 bootstrap 到 `DEFAULT_THRESHOLD=2`、`STRICT_THRESHOLD=3` 的运行态。这样不会继承 threshold 阶段留下的更激进配置，也不会撞上 `datadir already used by another process`。
-
-推荐直接跑整张矩阵：
-
-```bash
-cd /home/nitro/Desktop/experiments
+cd /data/4node-experiments
+rm -rf ./results/fault
+mkdir -p ./results/fault
+export SSH_PASSWORD='你的密码'
 ./run_matrix.sh ./matrix_fault.json ./results/fault
 ```
 
-常见 case 包括：
-
-- `fault_remote_normal`
-- `fault_delay_100ms`
-- `fault_delay_300ms`
-- `fault_delay_500ms`
-- `fault_down_1_slowhang`
-- `fault_down_1_degraded`
-- `fault_down_2_unavailable`
-
-其中：
-
-- `delay:node-2:100ms` 表示给 `node-2` 加 100ms 延迟
-- `delay:node-2:5000ms` 配合更短的 block endorsement timeout，可以模拟“节点不立即失败，但慢到等价于超时”的单节点挂起场景
-- `down:node-2` 表示停掉 1 个背书节点，观察系统在 `2-of-3` 下的退化表现
-- `down:node-2,node-3` 表示同时停掉两台，观察低于门限后的不可用表现
-
-故障实验的前提是：
-
-1. `fault_injector.sh` 能通过 SSH 连到三台背书节点
-2. 三台机器上都配置了对应的重启脚本，例如：
-   - `bash /data/node2_start.sh`
-   - `bash /data/node3_start.sh`
-   - `bash /data/node4_start.sh`
-
-`fault_injector.sh` 会优先自动探测目标机器的默认出口网卡。如果你的机器没有 `eth0`，也不用改脚本本身，直接在运行时覆盖即可：
+如果你希望 fault 之前先手工把 `node-1` 切到指定配置，可以先执行：
 
 ```bash
-FAULT_NETDEV=ens3 ./run_matrix.sh ./matrix_fault.json ./results/fault
+DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 bash /data/node1_redeploy.sh
 ```
 
-如果你的 SSH 还是密码登录，也可以在运行时提供密码：
+## 4. 只跑单个 case
+
+格式如下：
 
 ```bash
-SSH_PASSWORD='your-password' FAULT_NETDEV=ens3 ./run_matrix.sh ./matrix_fault.json ./results/fault
+./run_case.sh <matrix.json> <case_name> <case_env> <out_dir>
 ```
 
-前提是本机已安装 `sshpass`。如果你已经配好了 SSH key，建议继续用 key 登录，更安全也更稳定。
-
-如果你想单独验证某个故障，也可以直接跑单个 case：
+例如：
 
 ```bash
-./run_case.sh ./matrix_fault.json fault_delay_100ms ./accounts_pool/fault_delay_100ms.env ./results/fault
+cd /data/4node-experiments
+NODE1_BOOTSTRAP_CMD='RESET_CHAIN=1 bash /data/node1_redeploy.sh' \
+  ./run_case.sh \
+  ./matrix_threshold.json \
+  threshold_partial_reject_3of3 \
+  ./accounts_pool/threshold_partial_reject_3of3.env \
+  ./results/threshold
 ```
 
-如果你是从 threshold 或其它更严格的运行态切过来，单独跑 fault case 之前也建议先手动把 `node-1` 切回 `2-of-3`，例如：
+## 账户准备方式
+
+一般情况下，不需要手工单独准备账户，因为：
+
+- `run_matrix.sh` 会先调用 `prepare_accounts_pool.sh`
+- `run_case.sh` 在 `use_account_pool=true` 时，还会继续生成 keep / fail 账户池
+
+但如果你想提前准备某组账户，也可以手工执行：
 
 ```bash
-DEFAULT_THRESHOLD=2 STRICT_THRESHOLD=3 bash /home/nitro/Desktop/endorsement/scripts/node1_redeploy.sh
+cd /data/4node-experiments
+FUND_AMOUNT=5ether ./prepare_accounts_pool.sh ./matrix_performance.json ./accounts_pool
 ```
 
-### 统一产物
+说明：
 
-每个 case 最终都会生成三类结果文件：
+- `prepare_accounts_pool.sh` 会按矩阵里每个 case 生成 `accounts_pool/<case>.env`
+- `run_case.sh` 会在此基础上继续为 keep/fail 交易生成独立账户池
+- 这样做的目的，是避免并发发送时因为共享 nonce 导致 `nonce too high`
+
+## 结果查看
+
+## 1. 查看某个 case 的摘要
+
+```bash
+jq . ./results/performance/perf_remote_mixed_10pct_fail/summary.json
+```
+
+## 2. 快速查看同一组实验
+
+```bash
+cd /data/4node-experiments
+for d in results/threshold/*; do
+  [ -d "$d" ] || continue
+  echo "== $(basename "$d") =="
+  jq '{case_name,tx_total,tx_receipt_count,tx_error_count,lat_success_avg_ms,lat_success_p95_ms,workload_makespan_ms,rebuild_count,remote_request_count}' "$d/summary.json"
+done
+```
+
+## 3. 生成论文图
+
+如果已经有 `results/`，可以直接生成论文图片：
+
+```bash
+cd /home/nitro/Desktop/experiments
+python3 generate_thesis_figures.py --results-dir /home/nitro/Desktop/results --out-dir /home/nitro/Desktop/figures
+```
+
+## 常用环境变量
+
+以下变量最常用：
+
+- `NODE1_BOOTSTRAP_SCRIPT`
+  - 默认值：`/data/node1_redeploy.sh`
+- `NODE1_BOOTSTRAP_CMD`
+  - 控制每个 case 是否在开始前重启 `node-1`
+- `NODE1_RPC_URL`
+  - 默认值：`http://127.0.0.1:8547`
+- `SSH_PASSWORD`
+  - 密码登录三台背书节点时使用
+- `NODE2_SSH`
+- `NODE3_SSH`
+- `NODE4_SSH`
+- `NODE2_START_CMD`
+- `NODE3_START_CMD`
+- `NODE4_START_CMD`
+- `RESULTS_DIR`
+- `ACCOUNTS_DIR`
+- `FUND_AMOUNT`
+- `NONCE_CACHE_FILE`
+
+故障实验还常用：
+
+- `FAULT_TX_TOTAL`
+- `FAULT_TPS`
+- `FAULT_SEND_MODE`
+- `FAULT_CONCURRENCY`
+- `FAULT_FAIL_RATIO`
+- `FAULT_BATCHING_WINDOW_MS`
+- `FAULT_BLOCK_ENDORSEMENT_TIMEOUT_MS`
+- `FAULT_MAX_REBUILD_ROUNDS`
+
+这些变量的具体含义，请看：
+
+- [PARAMETERS_AND_METRICS.md](/home/nitro/Desktop/experiments/PARAMETERS_AND_METRICS.md)
+
+## 推荐实验顺序
+
+建议按下面顺序跑：
+
+1. `correctness`
+2. `performance`
+3. `threshold`
+4. `fault`
+
+原因是：
+
+- 先确认语义是否正确
+- 再看正常运行下的性能
+- 再看阈值差异
+- 最后做故障退化分析
+
+## 常见问题
+
+## 1. 为什么 threshold 跑出来还是 2-of-3
+
+常见原因是：
+
+- 直接执行了 `./run_matrix.sh ./matrix_threshold.json ...`
+- 但没有设置 `NODE1_BOOTSTRAP_CMD`
+
+这样 `node-1` 会沿用旧运行态，而不会按每个 case 的阈值重启。
+
+## 2. 为什么 performance / fault 会出现 nonce 问题
+
+旧版本实验脚本中，多个并发交易可能共享同一账户并竞争 nonce。现在默认通过 keep / fail 账户池避免这个问题。如果仍出现异常，请优先检查：
+
+- 是否使用了最新版仓库
+- `use_account_pool` 是否为 `true`
+- 是否手工覆盖了发送相关参数
+
+## 3. 为什么 slowhang 会比普通 one-down 慢很多
+
+因为 `one-down degraded` 更接近“节点快速失效”，而 `slowhang` 是“节点一直拖到接近超时”。两者都会减少有效背书节点，但对端到端时延的影响完全不同。
+
+## 4. 我该看哪个文件判断实验是否成功
+
+最推荐先看：
+
+- `summary.json`
+
+如果摘要不符合预期，再看：
 
 - `tx_results.csv`
-- `summary.json`
-- `summary.tsv`
+- `sequencer.log`
 
-你可以先看 `summary.tsv`，如果要做进一步分析，再看 `tx_results.csv`。
+## 5. 指标口径去哪里看
 
-## 说明
+统一看：
 
-- 这套脚本是裸机版，不再依赖 Docker Compose。
-- `run_matrix.sh` 会按矩阵逐个 case 跑 workload，本身不负责额外做实验分析。
-- `run_all_experiments.sh` 已经内置了 correctness / performance / threshold / fault 四组实验需要的 bootstrap 顺序和恢复动作。
+- [PARAMETERS_AND_METRICS.md](/home/nitro/Desktop/experiments/PARAMETERS_AND_METRICS.md)
