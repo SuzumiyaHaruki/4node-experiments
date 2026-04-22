@@ -38,6 +38,25 @@ def safe_int(value):
     except Exception:
         return None
 
+def completion_ts_for_row(row):
+    completion_ts = safe_int(row.get("completion_ts_ns", ""))
+    if completion_ts is not None:
+        return completion_ts
+
+    receipt_ts = safe_int(row.get("receipt_ts_ns", ""))
+    if receipt_ts is not None:
+        return receipt_ts
+
+    send_done_ts = safe_int(row.get("send_done_ts_ns", ""))
+    if send_done_ts is not None:
+        return send_done_ts
+
+    send_ts = safe_int(row.get("send_ts_ns", ""))
+    legacy_latency = safe_float(row.get("latency_ms", ""))
+    if send_ts is not None and legacy_latency is not None:
+        return send_ts + int(legacy_latency * 1_000_000)
+    return send_ts
+
 def parse_fault_status(path):
     result = {"fault_status": None, "fault_message": None, "fault_name": None}
     if not path:
@@ -112,6 +131,7 @@ def main():
     keep_rows = []
     fail_rows = []
     send_timestamps = []
+    send_done_timestamps = []
     completion_timestamps = []
     success_block_numbers = []
     tx_error_count = 0
@@ -129,6 +149,9 @@ def main():
       send_ts_ns = safe_int(r.get("send_ts_ns", ""))
       if send_ts_ns is not None:
         send_timestamps.append(send_ts_ns)
+      send_done_ts_ns = safe_int(r.get("send_done_ts_ns", ""))
+      if send_done_ts_ns is not None:
+        send_done_timestamps.append(send_done_ts_ns)
       err = str(r.get("error", "")).strip()
       err_stage = str(r.get("error_stage", "")).strip().lower()
       if err:
@@ -142,14 +165,14 @@ def main():
       status = str(r.get("receipt_status", "")).strip()
       if status:
         tx_receipt_count += 1
-      latency_ms = safe_float(r.get("latency_ms", ""))
-      if latency_ms is not None:
-        latencies.append(latency_ms)
-      if send_ts_ns is not None:
-        if latency_ms is not None:
-          completion_timestamps.append(send_ts_ns + int(latency_ms * 1_000_000))
-        else:
-          completion_timestamps.append(send_ts_ns)
+      success_latency_ms = safe_float(r.get("success_latency_ms", ""))
+      if success_latency_ms is None:
+        success_latency_ms = safe_float(r.get("latency_ms", ""))
+      if success_latency_ms is not None and classify_receipt_success(status):
+        latencies.append(success_latency_ms)
+      completion_ts_ns = completion_ts_for_row(r)
+      if completion_ts_ns is not None:
+        completion_timestamps.append(completion_ts_ns)
       if classify_receipt_success(status):
         block_number = safe_int(r.get("block_number", ""))
         if block_number is not None:
@@ -162,6 +185,9 @@ def main():
     workload_makespan_ms = None
     if send_timestamps and completion_timestamps:
         workload_makespan_ms = round((max(completion_timestamps) - min(send_timestamps)) / 1e6, 3)
+    send_phase_makespan_ms = None
+    if send_timestamps and send_done_timestamps:
+        send_phase_makespan_ms = round((max(send_done_timestamps) - min(send_timestamps)) / 1e6, 3)
     unique_success_blocks = len(set(success_block_numbers)) if success_block_numbers else 0
     success_per_block_avg = None
     if unique_success_blocks > 0:
@@ -205,6 +231,7 @@ def main():
         "lat_p95_ms": round(percentile(latencies, 0.95), 3) if latencies else None,
         "lat_p99_ms": round(percentile(latencies, 0.99), 3) if latencies else None,
         "workload_makespan_ms": workload_makespan_ms,
+        "send_phase_makespan_ms": send_phase_makespan_ms,
         "success_rate": success_rate,
         "success_tps": success_tps,
         "attempt_tps": attempt_tps,

@@ -92,14 +92,14 @@ jq \
   '
     map(
       if (.name | startswith("fault_")) then
-        .tx_total = $tx_total
-        | .tps = $tps
-        | .send_mode = $send_mode
-        | .concurrency = $concurrency
-        | .fail_ratio = $fail_ratio
-        | .batching_window_ms = $batching_window_ms
-        | .block_endorsement_timeout_ms = $block_endorsement_timeout_ms
-        | .max_rebuild_rounds = $max_rebuild_rounds
+        .tx_total = (.tx_total // $tx_total)
+        | .tps = (.tps // $tps)
+        | .send_mode = (.send_mode // $send_mode)
+        | .concurrency = (.concurrency // $concurrency)
+        | .fail_ratio = (.fail_ratio // $fail_ratio)
+        | .batching_window_ms = (.batching_window_ms // $batching_window_ms)
+        | .block_endorsement_timeout_ms = (.block_endorsement_timeout_ms // $block_endorsement_timeout_ms)
+        | .max_rebuild_rounds = (.max_rebuild_rounds // $max_rebuild_rounds)
       else
         .
       end
